@@ -193,7 +193,7 @@
   input[type="file"]{display:none;}
   input[type="number"]{width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border);font-size:14px;margin-bottom:12px;}
   label.f{font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:0.4px;text-transform:uppercase;display:block;margin-bottom:6px;}
-  img#previewImg{width:100%;border-radius:14px;margin:12px 0;display:none;}
+  img#previewImg{width:100%;max-height:280px;object-fit:contain;background:#F0EFEC;border-radius:14px;margin:12px 0;display:none;}
   .btn-main{
     width:100%;padding:15px;border-radius:14px;border:none;font-weight:700;font-size:14.5px;cursor:pointer;
     background:var(--ink);color:#fff;
@@ -724,14 +724,32 @@ function handleFileObj(file){
   reader.readAsDataURL(file);
 }
 
-document.getElementById('btnAnalyze').addEventListener('click', async ()=>{
+document.getElementById('btnAnalyze').addEventListener('click', ()=>analyzePhoto(0));
+
+async function analyzePhoto(attempt){
   const statusEl=document.getElementById('uploadStatus'); const btn=document.getElementById('btnAnalyze');
-  btn.disabled=true; statusEl.className='status-msg'; statusEl.textContent='Analyse en cours…';
+  btn.disabled=true;
+  statusEl.className='status-msg';
+  statusEl.textContent = attempt===0 ? 'Analyse en cours…' : `Nouvelle tentative (${attempt+1}/3)…`;
   const year=document.getElementById('yearInput').value || new Date().getFullYear();
 
-  const prompt = `Tu regardes la photo d'un planning de restaurant. Colonnes = jours (Lundi à Dimanche), lignes = semaines divisées en MIDI et SOIR. Réponds UNIQUEMENT avec un JSON valide, sans texte autour, format exact :
+  const prompt = `Tu es un expert en lecture de tableaux de planning imprimés. Analyse cette photo d'un planning de restaurant avec un soin extrême — chaque erreur de lecture peut créer un vrai problème dans l'organisation du restaurant.
+
+ÉTAPE 1 — Identifie la structure du tableau avant de répondre :
+- Les 7 jours (Lundi à Dimanche) peuvent être en colonnes OU en lignes selon la photo — regarde attentivement les en-têtes.
+- Les semaines (souvent étiquetées "SEMAINE DU JJ/MM") peuvent être en lignes OU en colonnes.
+- Chaque jour est divisé en MIDI et SOIR (parfois "M"/"S" ou deux sous-lignes/sous-colonnes).
+- Repère bien les cases barrées, les mentions "FERMÉ", et les petites notes en dessous des noms (ex: "Pizza + froid", "Salade du jour").
+
+ÉTAPE 2 — Lis chaque case avec attention, lettre par lettre. Les prénoms sont toujours en MAJUSCULES sur la photo (HAMID, MOMO, QUENTIN, UGO, JULIEN, ou autres). Ne confonds jamais deux prénoms qui se ressemblent. Si une case est vide (aucun nom écrit), laisse-la vide — n'invente jamais un nom.
+
+ÉTAPE 3 — Réponds UNIQUEMENT avec un JSON valide, sans texte autour, sans balises markdown, format exact :
 {"weeks":[{"wl":"JJ/MM","d":{"lu":{"m":SHIFT,"s":SHIFT},"ma":{"m":SHIFT,"s":SHIFT},"me":{"m":SHIFT,"s":SHIFT},"je":{"m":SHIFT,"s":SHIFT},"ve":{"m":SHIFT,"s":SHIFT},"sa":{"m":SHIFT,"s":SHIFT},"di":{"m":SHIFT,"s":SHIFT}}}]}
-SHIFT = null (case vide) OU {"c":true} (fermé) OU {"x":["NOM1","NOM2"],"n":"note optionnelle"} (noms en MAJUSCULES). "wl" = date du lundi lue sur l'étiquette "SEMAINE DU...". Année ${year}.`;
+
+SHIFT = null (case vide, aucun service) OU {"c":true} (fermé) OU {"x":["NOM1","NOM2"],"n":"note optionnelle"} (noms en MAJUSCULES tels qu'écrits, dans l'ordre où ils apparaissent). Le champ "n" est à omettre s'il n'y a pas de note.
+"wl" = date du lundi de cette semaine au format JJ/MM, lue précisément sur l'étiquette "SEMAINE DU..." si elle existe sur la photo. Inclus TOUTES les semaines visibles sur la photo, aucune de moins. Année de référence : ${year}.
+
+Rappel important : cette lecture sera vérifiée visuellement par un humain avant d'être utilisée, donc privilégie l'exactitude à la vitesse — prends le temps de bien regarder chaque case.`;
 
   try{
     const response=await fetch("https://api.anthropic.com/v1/messages",{
@@ -742,47 +760,127 @@ SHIFT = null (case vide) OU {"c":true} (fermé) OU {"x":["NOM1","NOM2"],"n":"not
           {type:"text", text:prompt}
         ]}]})
     });
+    if(!response.ok) throw new Error('http-'+response.status);
     const data=await response.json();
     let text=data.content.map(b=>b.text||"").join("");
     text=text.replace(/```json|```/g,'').trim();
     const parsed=JSON.parse(text);
+
+    // Validate structure before trusting it
+    if(!parsed.weeks || !Array.isArray(parsed.weeks) || parsed.weeks.length===0) throw new Error('empty-result');
+    for(const w of parsed.weeks){
+      if(!w.wl || !/^\d{1,2}\/\d{1,2}$/.test(w.wl)) throw new Error('bad-week-label');
+      for(const j of jours){ if(!w.d || !(j in w.d)) throw new Error('missing-day'); }
+    }
+
     showPreview(parsed, year);
-    statusEl.className='status-msg ok'; statusEl.textContent='✓ Lecture terminée — vérifie puis enregistre.';
+    statusEl.className='status-msg ok';
+    statusEl.textContent="✓ Lecture terminée — vérifie et corrige chaque jour ci-dessous avant d'enregistrer.";
   }catch(err){
-    console.error(err);
-    statusEl.className='status-msg err'; statusEl.textContent="Impossible de lire cette photo. Réessaie avec une image plus nette.";
+    console.error(err, 'attempt', attempt);
+    if(attempt < 2){
+      await analyzePhoto(attempt+1);
+      return;
+    }
+    statusEl.className='status-msg err';
+    statusEl.textContent="La lecture automatique n'a pas abouti après plusieurs essais. Réessaie avec une photo plus nette et bien cadrée, ou remplis manuellement dans l'onglet Semaine.";
   }
   btn.disabled=false;
-});
+}
+
+/* ---- Editable, human-verified preview ---- */
+let previewInputs = []; // {weekIndex, dayKey, midiInput, soirInput, noteInput}
 
 function showPreview(parsed, year){
-  pendingWeeksData=parsed.weeks; pendingYear=year;
+  pendingWeeksData = parsed.weeks;
+  pendingYear = year;
+  previewInputs = [];
   const zone=document.getElementById('previewZone'); zone.innerHTML='';
-  parsed.weeks.forEach(w=>{
+
+  const warn = document.createElement('div');
+  warn.className='note-line';
+  warn.style.marginBottom='10px';
+  warn.innerHTML = '⚠️ Vérifie chaque ligne avec la photo ci-dessus. Corrige directement le texte si besoin, puis enregistre.';
+  zone.appendChild(warn);
+
+  parsed.weeks.forEach((w, wi)=>{
     const box=document.createElement('div'); box.className='preview-week';
     let inner=`<h4>Semaine du ${w.wl}/${year}</h4>`;
     jours.forEach(j=>{
-      const dObj=w.d[j];
-      inner+=`<div class="preview-day"><span>${joursLabel[j]}</span><span>☀️ ${shiftPreviewText(dObj.m)} · 🌙 ${shiftPreviewText(dObj.s)}</span></div>`;
+      const dObj = w.d[j] || {m:null, s:null};
+      const midiVal = shiftToEditText(dObj.m);
+      const soirVal = shiftToEditText(dObj.s);
+      const noteVal = (dObj.m && dObj.m.n) ? dObj.m.n : '';
+      inner += `
+        <div class="preview-day" style="flex-direction:column;align-items:stretch;gap:4px;">
+          <div style="font-weight:800;font-size:12px;">${joursLabel[j]}</div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="width:34px;font-size:11px;color:var(--muted2);">☀️ midi</span>
+            <input type="text" data-w="${wi}" data-d="${j}" data-k="m" value="${escapeAttr(midiVal)}" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="width:34px;font-size:11px;color:var(--muted2);">🌙 soir</span>
+            <input type="text" data-w="${wi}" data-d="${j}" data-k="s" value="${escapeAttr(soirVal)}" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="width:34px;font-size:11px;color:var(--muted2);">✎ note</span>
+            <input type="text" data-w="${wi}" data-d="${j}" data-k="n" value="${escapeAttr(noteVal)}" placeholder="optionnel" style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border);font-size:12px;">
+          </div>
+        </div>`;
     });
-    box.innerHTML=inner; zone.appendChild(box);
+    box.innerHTML=inner;
+    zone.appendChild(box);
   });
+
   document.getElementById('btnSave').classList.remove('hidden');
 }
-function shiftPreviewText(shift){
-  if(!shift) return '—'; if(shift.c) return 'fermé';
-  return shift.x.map(n=>n===myName?`<b>${n}</b>`:n).join(', ');
+
+function shiftToEditText(shift){
+  if(!shift) return '';
+  if(shift.c) return 'fermé';
+  return (shift.x||[]).join(', ');
 }
+function escapeAttr(s){
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+function parseEditText(text){
+  const t=(text||'').trim();
+  if(!t) return null;
+  if(t.toLowerCase()==='fermé' || t.toLowerCase()==='ferme') return {c:true};
+  return {x: t.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean)};
+}
+
 document.getElementById('btnSave').addEventListener('click', async ()=>{
   if(!pendingWeeksData) return;
-  pendingWeeksData.forEach(w=>{
+
+  // Re-read the (possibly corrected) values directly from the editable preview inputs
+  const zone=document.getElementById('previewZone');
+  const inputs = zone.querySelectorAll('input[data-w]');
+  const grid = {}; // wi -> day -> {m,s,n}
+  inputs.forEach(inp=>{
+    const wi=inp.dataset.w, d=inp.dataset.d, k=inp.dataset.k;
+    grid[wi] = grid[wi] || {};
+    grid[wi][d] = grid[wi][d] || {};
+    grid[wi][d][k] = inp.value;
+  });
+
+  pendingWeeksData.forEach((w, wi)=>{
     const[dd,mm]=w.wl.split('/').map(Number);
     const monday=new Date(pendingYear,mm-1,dd);
-    jours.forEach((j,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);scheduleData[fmtDate(d)]=w.d[j];});
+    jours.forEach((j,i)=>{
+      const d=new Date(monday); d.setDate(monday.getDate()+i);
+      const cell = grid[wi] && grid[wi][j] ? grid[wi][j] : {};
+      const m = parseEditText(cell.m);
+      const s = parseEditText(cell.s);
+      const note = (cell.n||'').trim();
+      if(m && note) m.n = note;
+      scheduleData[fmtDate(d)] = {m, s};
+    });
   });
+
   await saveSchedule();
   document.getElementById('uploadStatus').className='status-msg ok';
-  document.getElementById('uploadStatus').textContent="✓ Planning enregistré pour toute l'équipe !";
+  document.getElementById('uploadStatus').textContent="✓ Planning vérifié et enregistré pour toute l'équipe !";
   document.getElementById('previewZone').innerHTML='';
   document.getElementById('btnSave').classList.add('hidden');
   document.getElementById('previewImg').style.display='none';
