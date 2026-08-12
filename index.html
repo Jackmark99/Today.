@@ -1,819 +1,180 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#18181B">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#191713">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Planning">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="icon" href="icon-192.png">
 <link rel="manifest" href="manifest.json">
-<title>Équipe — Planning</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#FAFAF9;
-    --surface:#FFFFFF;
-    --border:#E7E5E2;
-    --ink:#18181B;
-    --muted:#78766F;
-    --muted2:#A6A39A;
-    --red:#DC2626;
-    --red-soft:#FEE2E2;
-    --green:#16A34A;
-    --green-soft:#DCFCE7;
-    --amber:#D97706;
-    --amber-soft:#FEF3C7;
-    --radius:16px;
-    --shadow:0 1px 2px rgba(24,24,27,0.04), 0 8px 24px rgba(24,24,27,0.06);
-  }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{height:100%;}
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--ink);
-    font-family:'Inter',sans-serif;
-    padding-bottom:86px;
-    -webkit-font-smoothing:antialiased;
-  }
-  .app{max-width:520px;margin:0 auto;padding:0 16px;}
-  .hidden{display:none !important;}
-  button{font-family:'Inter',sans-serif;}
-
-  /* ============ ONBOARDING ============ */
-  #onboarding{
-    min-height:100vh;display:flex;flex-direction:column;justify-content:center;
-    padding:32px 24px;max-width:420px;margin:0 auto;
-  }
-  .ob-logo{
-    width:52px;height:52px;border-radius:14px;background:var(--ink);
-    display:flex;align-items:center;justify-content:center;margin-bottom:24px;
-  }
-  .ob-logo span{color:#fff;font-weight:800;font-size:20px;}
-  #onboarding h1{font-size:26px;font-weight:800;margin:0 0 6px;letter-spacing:-0.5px;}
-  #onboarding p.lead{color:var(--muted);font-size:14px;margin:0 0 28px;line-height:1.5;}
-  .roster-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
-  .roster-pill{
-    padding:12px 18px;border-radius:12px;border:1.5px solid var(--border);
-    background:var(--surface);font-weight:600;font-size:14px;cursor:pointer;
-    transition:all 0.15s;
-  }
-  .roster-pill:hover{border-color:var(--ink);transform:translateY(-1px);}
-  .roster-pill.picked{background:var(--ink);color:#fff;border-color:var(--ink);}
-  .ob-newrow{display:flex;gap:8px;margin-top:6px;}
-  .ob-newrow input{
-    flex:1;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border);
-    font-size:14px;font-family:'Inter',sans-serif;
-  }
-  .ob-newrow button{
-    padding:12px 18px;border-radius:12px;border:none;background:var(--ink);color:#fff;
-    font-weight:700;font-size:14px;cursor:pointer;
-  }
-  .ob-continue{
-    margin-top:28px;width:100%;padding:16px;border-radius:14px;border:none;
-    background:var(--red);color:#fff;font-weight:700;font-size:15px;cursor:pointer;
-    transition:opacity 0.15s;
-  }
-  .ob-continue:disabled{opacity:0.35;}
-
-  /* ============ HEADER ============ */
-  header.topbar{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:18px 0 14px;position:sticky;top:0;background:var(--bg);z-index:10;
-  }
-  .brand-mini{display:flex;align-items:center;gap:10px;}
-  .brand-mini .logo{width:34px;height:34px;border-radius:9px;background:var(--ink);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;}
-  .brand-mini .title{font-weight:800;font-size:16px;letter-spacing:-0.3px;}
-  .me-badge{
-    display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:100px;
-    background:var(--red-soft);color:var(--red);font-weight:700;font-size:12.5px;cursor:pointer;
-    border:none;
-  }
-
-  /* ============ VIEWS ============ */
-  .view{display:none;animation:fadeIn 0.25s ease;}
-  .view.active{display:block;}
-  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
-
-  .section-label{font-size:12px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:0.6px;margin:22px 0 10px;}
-  .section-label:first-child{margin-top:0;}
-
-  /* Hero status card */
-  .hero{
-    background:var(--surface);border:1px solid var(--border);border-radius:20px;
-    padding:22px;box-shadow:var(--shadow);margin-bottom:6px;position:relative;overflow:hidden;
-  }
-  .hero-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;}
-  .hero-date{font-size:13px;color:var(--muted);font-weight:600;text-transform:capitalize;}
-  .status-pill{
-    display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:100px;
-    font-weight:800;font-size:13px;
-  }
-  .status-pill.travail{background:var(--red-soft);color:var(--red);}
-  .status-pill.repos{background:var(--green-soft);color:var(--green);}
-  .status-pill.ferme{background:#F0F0EE;color:var(--muted);}
-  .status-pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor;}
-  .hero-big{font-size:22px;font-weight:800;letter-spacing:-0.5px;margin-bottom:2px;}
-  .hero-shifts{margin-top:16px;display:flex;flex-direction:column;gap:10px;}
-  .shift-line{
-    display:flex;align-items:center;gap:12px;padding:12px 14px;background:#FAFAF8;
-    border-radius:12px;border:1px solid var(--border);
-  }
-  .shift-line .icon{width:32px;height:32px;border-radius:9px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:15px;}
-  .shift-line .body{flex:1;min-width:0;}
-  .shift-line .lbl{font-size:11px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:0.5px;}
-  .names-wrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
-  .name-chip{padding:3px 10px;border-radius:100px;font-size:12.5px;font-weight:600;background:var(--surface);border:1px solid var(--border);color:var(--muted);}
-  .name-chip.me{background:var(--red);color:#fff;border-color:var(--red);}
-  .note-line{font-size:11.5px;color:var(--amber);margin-top:4px;font-weight:600;}
-
-  /* Day strip */
-  .daystrip{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;scrollbar-width:none;}
-  .daystrip::-webkit-scrollbar{display:none;}
-  .daychip{
-    flex:0 0 auto;width:46px;text-align:center;padding:10px 0;border-radius:14px;
-    background:var(--surface);border:1px solid var(--border);cursor:pointer;transition:all 0.15s;
-  }
-  .daychip .dn{font-size:10px;color:var(--muted2);font-weight:700;text-transform:uppercase;}
-  .daychip .dd{font-size:15px;font-weight:800;margin-top:2px;}
-  .daychip .indicator{width:5px;height:5px;border-radius:50%;margin:4px auto 0;background:transparent;}
-  .daychip.works .indicator{background:var(--red);}
-  .daychip.selected{background:var(--ink);border-color:var(--ink);}
-  .daychip.selected .dn{color:#C9C7C1;}
-  .daychip.selected .dd{color:#fff;}
-
-  /* Week list */
-  .week-day-card{
-    background:var(--surface);border:1px solid var(--border);border-radius:16px;
-    padding:14px 16px;margin-bottom:10px;
-  }
-  .wdc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
-  .wdc-day{font-weight:800;font-size:14.5px;text-transform:capitalize;}
-  .wdc-date{font-size:12px;color:var(--muted2);font-weight:600;}
-  .wdc-row{display:flex;gap:8px;align-items:center;font-size:13px;padding:6px 0;}
-  .wdc-row .tag-time{width:44px;flex-shrink:0;color:var(--muted2);font-weight:700;font-size:11px;text-transform:uppercase;}
-
-  /* Team view */
-  .team-list{display:flex;flex-direction:column;gap:8px;}
-  .team-row{
-    display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:12px 14px;
-  }
-  .avatar{width:36px;height:36px;border-radius:10px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;flex-shrink:0;}
-  .team-row .nm{font-weight:700;font-size:14px;flex:1;}
-  .team-row .rm{border:none;background:none;color:var(--muted2);cursor:pointer;padding:6px;}
-  .add-member{display:flex;gap:8px;margin-top:12px;}
-  .add-member input{flex:1;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border);font-size:14px;}
-  .add-member button{padding:12px 16px;border-radius:12px;border:none;background:var(--ink);color:#fff;font-weight:700;cursor:pointer;}
-
-  .share-card{
-    background:linear-gradient(135deg,#18181B,#2A2A2E);border-radius:16px;padding:18px;color:#fff;margin-bottom:6px;
-  }
-  .share-card .t{font-weight:800;font-size:14.5px;margin-bottom:4px;}
-  .share-card .d{font-size:12.5px;color:#B8B6B0;line-height:1.5;margin-bottom:12px;}
-  .share-card button{
-    width:100%;padding:12px;border-radius:10px;border:none;background:#fff;color:#18181B;
-    font-weight:700;font-size:13.5px;cursor:pointer;
-  }
-
-  /* Manual edit form */
-  label.f{font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:0.4px;text-transform:uppercase;display:block;margin-bottom:6px;}
-  .btn-main{
-    width:100%;padding:15px;border-radius:14px;border:none;font-weight:700;font-size:14.5px;cursor:pointer;
-    background:var(--ink);color:#fff;
-  }
-  .btn-main.red{background:var(--red);}
-  .btn-main:disabled{opacity:0.35;}
-  .status-msg{font-size:12.5px;margin-top:10px;text-align:center;color:var(--muted);font-weight:600;}
-  .status-msg.err{color:var(--red);}
-  .status-msg.ok{color:var(--green);}
-
-  /* Bottom nav */
-  nav.bottomnav{
-    position:fixed;bottom:0;left:0;right:0;background:var(--surface);
-    border-top:1px solid var(--border);display:flex;justify-content:space-around;
-    padding:10px 6px calc(10px + env(safe-area-inset-bottom));z-index:20;
-    max-width:520px;margin:0 auto;
-  }
-  .navbtn{
-    display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;
-    color:var(--muted2);cursor:pointer;padding:4px 14px;font-size:10.5px;font-weight:700;
-  }
-  .navbtn.active{color:var(--ink);}
-  .navbtn svg{width:22px;height:22px;}
-  .navbtn.active svg{stroke:var(--red);}
-
-  .edit-fab-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-top:8px;}
-  textarea, .edit-fab-card input[type=text]{width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);font-size:13px;font-family:'Inter',sans-serif;margin-bottom:8px;}
-
-  /* Multi-week planning grid */
-  .grid-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
-  .grid-nav button{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-weight:700;font-size:13px;cursor:pointer;color:var(--ink);}
-  .grid-nav .range-label{font-size:12.5px;font-weight:700;color:var(--muted);}
-  .plan-grid-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:14px;background:var(--surface);}
-  table.plan-grid{border-collapse:collapse;width:max-content;min-width:100%;}
-  .plan-grid th{background:#F5F4F2;font-weight:800;font-size:10.5px;text-transform:uppercase;color:var(--muted);padding:8px 6px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);white-space:nowrap;}
-  .plan-grid td{padding:6px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);vertical-align:top;}
-  .plan-grid tr:last-child td{border-bottom:none;}
-  .plan-grid th:last-child, .plan-grid td:last-child{border-right:none;}
-  .plan-wk-cell{position:sticky;left:0;background:var(--surface);z-index:1;min-width:110px;}
-  .plan-wk-label{font-weight:800;font-size:12px;}
-  .plan-wk-dup{margin-top:4px;font-size:10px;font-weight:700;color:var(--red);background:var(--red-soft);border:none;border-radius:8px;padding:3px 7px;cursor:pointer;}
-  .plan-cell{min-width:64px;cursor:pointer;border-radius:8px;padding:5px 6px;}
-  .plan-cell:hover{background:var(--red-soft);}
-  .plan-cell .pc-shift{font-size:9.5px;color:var(--muted2);font-weight:700;text-transform:uppercase;margin-bottom:1px;}
-  .plan-cell .pc-names{font-size:11px;line-height:1.35;color:var(--ink);}
-  .plan-cell .pc-names.me{color:var(--red);font-weight:800;}
-  .plan-cell .pc-empty{color:var(--muted2);}
-  .plan-cell .pc-closed{color:var(--muted);font-weight:700;}
-</style>
+<title>Planning — Le Comptoir</title>
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&f[]=cabinet-grotesk@700,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <!-- ============ ONBOARDING ============ -->
-<div id="onboarding">
-  <div class="ob-logo"><span>É</span></div>
-  <h1>Bienvenue</h1>
-  <p class="lead">Sélectionne ton prénom pour voir ton planning personnel — ou ajoute-le s'il n'est pas encore dans l'équipe.</p>
-  <div class="roster-grid" id="obRoster"></div>
-  <div class="ob-newrow">
-    <input type="text" id="obNewName" placeholder="Ton prénom">
-    <button id="obAddBtn">Ajouter</button>
+<div class="stage" id="onboardingStage">
+  <div class="phone">
+    <div class="app" id="onboardingApp">
+      <div class="ob-wrap">
+        <svg class="logo" style="width:34px;height:34px;margin-bottom:14px;" viewBox="0 0 32 32" fill="none">
+          <rect x="1.25" y="1.25" width="29.5" height="29.5" rx="9" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M9 11h14M9 16h9M9 21h5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <h1 class="ob-title">Bienvenue</h1>
+        <p class="ob-lead">Choisis ton prénom pour voir ton planning — ou ajoute-le s'il n'est pas encore dans l'équipe.</p>
+        <div class="ob-chips" id="obChips"></div>
+        <div class="ob-newrow">
+          <input type="text" id="obNewName" class="ob-input" placeholder="Ton prénom">
+          <div class="ob-roletoggle" id="obRoleToggle">
+            <button type="button" class="ob-role-btn is-active" data-role="salle">Salle</button>
+            <button type="button" class="ob-role-btn" data-role="cuisine">Cuisine</button>
+          </div>
+          <button class="btn btn-ghost" id="obAddBtn" style="width:100%;">Ajouter à l'équipe</button>
+        </div>
+        <button class="btn btn-solid" id="obContinue" disabled style="margin-top:var(--space-4);">Continuer</button>
+      </div>
+    </div>
   </div>
-  <button class="ob-continue" id="obContinue" disabled>Continuer</button>
 </div>
 
 <!-- ============ MAIN APP ============ -->
-<div class="app hidden" id="mainApp">
-  <header class="topbar">
-    <div class="brand-mini">
-      <div class="logo">É</div>
-      <div class="title">Planning</div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button class="me-badge hidden" id="installBtn" style="background:var(--ink);color:#fff;">⬇️ Installer</button>
-      <button class="me-badge" id="meBadge">👋 —</button>
-    </div>
-  </header>
+<div class="stage is-hidden" id="mainStage">
+  <div class="phone">
+    <div class="app" id="app">
 
-  <!-- TODAY VIEW -->
-  <div class="view active" id="view-today">
-    <div class="hero">
-      <div class="hero-top">
-        <div>
-          <div class="hero-date" id="heroDateLabel">—</div>
-          <div class="hero-big" id="heroBig">—</div>
+      <header class="topbar">
+        <div class="brand">
+          <svg class="logo" viewBox="0 0 32 32" aria-label="Planning" fill="none">
+            <rect x="1.25" y="1.25" width="29.5" height="29.5" rx="9" stroke="currentColor" stroke-width="2.5"/>
+            <path d="M9 11h14M9 16h9M9 21h5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+          <span class="brand-name">Planning</span>
         </div>
-        <span class="status-pill travail" id="statusPill"><span class="dot"></span><span id="statusText">—</span></span>
-      </div>
-      <div class="hero-shifts" id="heroShifts"></div>
-    </div>
+        <div class="topbar-right">
+          <button class="icon-btn" data-theme-toggle aria-label="Passer en mode sombre"></button>
+          <button class="me-chip" id="meChip" aria-label="Mon profil">
+            <span class="av av-me" id="meAvatar">H</span><span id="meLabel">—</span>
+          </button>
+        </div>
+      </header>
 
-    <div class="section-label">Cette semaine</div>
-    <div class="daystrip" id="daystrip"></div>
-  </div>
+      <main class="scroll" id="scroll">
 
-  <!-- WEEK VIEW -->
-  <div class="view" id="view-week">
-    <div class="section-label">Planifier plusieurs semaines</div>
-    <div class="grid-nav">
-      <button id="gridPrev">◀ Précédent</button>
-      <span class="range-label" id="gridRangeLabel">—</span>
-      <button id="gridNext">Suivant ▶</button>
-    </div>
-    <div class="plan-grid-wrap">
-      <table class="plan-grid" id="planGrid"></table>
-    </div>
+        <!-- ============ TODAY ============ -->
+        <section class="view" data-view="today">
+          <div class="hero" id="hero">
+            <div class="hero-top">
+              <p class="eyebrow" id="heroDate">—</p>
+              <span class="pill" id="heroPill">—</span>
+            </div>
+            <h1 class="hero-title" id="heroTitle">—</h1>
+            <p class="hero-sub" id="heroSub"></p>
+          </div>
 
-    <div class="section-label">Semaine complète</div>
-    <div id="weekList"></div>
+          <div class="split" id="todaySplit"></div>
 
-    <div class="section-label">Modifier un jour</div>
-    <div class="edit-fab-card">
-      <input type="date" id="editDate" style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);margin-bottom:10px;">
-      <label class="f">☀️ Midi</label>
-      <textarea id="editMidi" rows="2" placeholder="HAMID, QUENTIN ou fermé"></textarea>
-      <label class="f">🌙 Soir</label>
-      <textarea id="editSoir" rows="2" placeholder="MOMO, HAMID, QUENTIN ou fermé"></textarea>
-      <label class="f">Note</label>
-      <input type="text" id="editNote" placeholder="ex : Pizza + froid">
-      <button class="btn-main" id="btnSaveManual" style="margin-top:4px;">Enregistrer</button>
-      <div class="status-msg" id="manualStatus"></div>
-    </div>
-  </div>
+          <button class="btn btn-ghost" id="shareBtn" style="width:100%;margin-top:var(--space-3);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 15v3a2 2 0 002 2h10a2 2 0 002-2v-3"/></svg>
+            Partager
+          </button>
 
-  <!-- TEAM VIEW -->
-  <div class="view" id="view-team">
-    <div class="share-card">
-      <div class="t">🔗 Inviter l'équipe</div>
-      <div class="d">Envoie ce lien à tes collègues. Chacun choisit son prénom en arrivant et voit son propre planning.</div>
-      <button id="btnCopyLink">Copier le lien</button>
-    </div>
+          <h2 class="sec-title">Cette semaine</h2>
+          <div class="daystrip" id="dayStrip"></div>
+          <div class="note" id="noteWrap" style="display:none;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11.5 12h1v4.5"/></svg>
+            <p class="note-txt" id="noteTxt"></p>
+          </div>
+        </section>
 
-    <div class="section-label">Membres de l'équipe</div>
-    <div class="team-list" id="teamList"></div>
-    <div class="add-member">
-      <input type="text" id="teamNewName" placeholder="Nouveau membre">
-      <button id="teamAddBtn">Ajouter</button>
+        <!-- ============ WEEK ============ -->
+        <section class="view is-hidden" data-view="week">
+          <div class="weeknav">
+            <button class="nav-arrow" id="wPrev" aria-label="Semaine précédente">‹</button>
+            <div class="weeknav-label">
+              <strong id="wLabel">—</strong>
+              <span id="wMeta">—</span>
+            </div>
+            <button class="nav-arrow" id="wNext" aria-label="Semaine suivante">›</button>
+          </div>
+
+          <div class="wgrid-head">
+            <span></span><span>Midi</span><span>Soir</span>
+          </div>
+          <div class="wgrid" id="wGrid"></div>
+
+          <button class="btn btn-solid" id="copyBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 9V5a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2h-4M5 9h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>
+            Copier vers la semaine suivante
+          </button>
+
+          <h2 class="sec-title">Modifier un jour</h2>
+          <div class="edit-card" id="editCard">
+            <input type="date" id="editDate" class="ob-input">
+            <label class="edit-label">☀️ Midi</label>
+            <textarea id="editMidi" class="ob-input" rows="2" placeholder="HAMID, QUENTIN ou fermé"></textarea>
+            <label class="edit-label">🌙 Soir</label>
+            <textarea id="editSoir" class="ob-input" rows="2" placeholder="MOMO, HAMID, QUENTIN ou fermé"></textarea>
+            <label class="edit-label">Note du service</label>
+            <input type="text" id="editNote" class="ob-input" placeholder="ex : Menu du jour, groupe en terrasse…">
+            <button class="btn btn-solid" id="btnSaveManual" style="width:100%;">Enregistrer</button>
+          </div>
+        </section>
+
+        <!-- ============ TEAM ============ -->
+        <section class="view is-hidden" data-view="team">
+          <h2 class="sec-title first">Équité de la semaine</h2>
+          <p class="hint tight">Semaine affichée · midis et soirs par personne</p>
+          <div class="equity" id="equity"></div>
+
+          <div class="team-filter" id="teamFilter">
+            <button class="tf-btn is-active" data-role="all">Tous</button>
+            <button class="tf-btn" data-role="salle">Salle</button>
+            <button class="tf-btn" data-role="cuisine">Cuisine</button>
+          </div>
+          <div class="people" id="people"></div>
+
+          <h2 class="sec-title">Ajouter un membre</h2>
+          <div class="edit-card">
+            <input type="text" id="teamNewName" class="ob-input" placeholder="Prénom">
+            <div class="ob-roletoggle" id="teamRoleToggle">
+              <button type="button" class="ob-role-btn is-active" data-role="salle">Salle</button>
+              <button type="button" class="ob-role-btn" data-role="cuisine">Cuisine</button>
+            </div>
+            <button class="btn btn-solid" id="teamAddBtn" style="width:100%;">Ajouter</button>
+          </div>
+
+          <h2 class="sec-title">Inviter l'équipe</h2>
+          <button class="btn btn-ghost" id="btnCopyLink" style="width:100%;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1.5 1.5M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1.5-1.5"/></svg>
+            Copier le lien de l'appli
+          </button>
+        </section>
+
+      </main>
+
+      <nav class="tabbar">
+        <button class="tab is-active" data-tab="today">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2" stroke-linecap="round"/></svg>
+          <span>Aujourd'hui</span>
+        </button>
+        <button class="tab" data-tab="week">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3.5v3M16 3.5v3M3.5 10h17" stroke-linecap="round"/></svg>
+          <span>Semaine</span>
+        </button>
+        <button class="tab" data-tab="team">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 2.9-4.6 5.5-4.6S14 16 14.6 19" stroke-linecap="round"/><path d="M16 7.2a3 3 0 010 5.6M18 19c-.2-1.6-.7-2.9-1.6-3.9" stroke-linecap="round"/></svg>
+          <span>Équipe</span>
+        </button>
+      </nav>
+
+      <div class="toast" id="toast"><span id="toastMsg"></span></div>
     </div>
   </div>
 </div>
 
-<nav class="bottomnav hidden" id="bottomnav">
-  <button class="navbtn active" data-view="today">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-    Aujourd'hui
-  </button>
-  <button class="navbtn" data-view="week">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
-    Semaine
-  </button>
-  <button class="navbtn" data-view="team">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6M16 5.5c1.7.3 3 1.8 3 3.5s-1.3 3.2-3 3.5M22 20c0-2.8-1.8-5-4.5-5.8"/></svg>
-    Équipe
-  </button>
-</nav>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-
-/* ============================================================
-   FIREBASE CONFIG — REQUIRED
-   1. Go to https://console.firebase.google.com → create a project (free)
-   2. Build → Firestore Database → Create database → Start in "test mode"
-   3. Project settings (gear icon) → General → "Your apps" → Web (</>) → register app
-   4. Copy the firebaseConfig object it gives you and paste it below
-   ============================================================ */
-const firebaseConfig = {
-  apiKey: "AIzaSyB4TbEW1hsuJSDznTtAdTnjpkc5j16BR7U",
-  authDomain: "planning-equipe-44750.firebaseapp.com",
-  projectId: "planning-equipe-44750",
-  storageBucket: "planning-equipe-44750.firebasestorage.app",
-  messagingSenderId: "458088730695",
-  appId: "1:458088730695:web:b4206e8b51902b055b2162"
-};
-
-let db = null;
-let firebaseOk = false;
-
-try{
-  if(firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY"){
-    const fbApp = initializeApp(firebaseConfig);
-    db = getFirestore(fbApp);
-    firebaseOk = true;
-  }
-}catch(e){ console.warn("Firebase init failed", e); firebaseOk = false; }
-
-/* ============ PWA: real service worker (manifest.json is linked as a static file in <head>) ============ */
-(function setupPWA(){
-  try{
-    if("serviceWorker" in navigator){
-      navigator.serviceWorker.register("sw.js").catch(()=>{ /* non-fatal: app still works without offline caching */ });
-    }
-    window.addEventListener('beforeinstallprompt', (e)=>{
-      e.preventDefault();
-      window.__deferredInstallPrompt = e;
-      const btn = document.getElementById('installBtn');
-      if(btn) btn.classList.remove('hidden');
-    });
-  }catch(e){ console.warn('PWA setup skipped', e); }
-})();
-
-/* ============ CONSTANTS ============ */
-const SCHEDULE_DOC="schedule";
-const ROSTER_DOC="roster";
-const IDENTITY_LOCALSTORAGE_KEY="my-identity";
-const jours=["lu","ma","me","je","ve","sa","di"];
-const joursLabel={lu:"lundi",ma:"mardi",me:"mercredi",je:"jeudi",ve:"vendredi",sa:"samedi",di:"dimanche"};
-const monthFr=["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
-const dayFullFr=["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"];
-
-function fmtDate(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
-
-/* ============ DEFAULT SEED ============ */
-function buildDefaultSeed(){
-  const W=(wl,d)=>({wl,d});
-  const weeks=[
-    W("27/07",{lu:{m:{x:["HAMID","UGO","QUENTIN"]},s:null},ma:{m:{x:["HAMID","UGO","QUENTIN"]},s:{x:["UGO","QUENTIN"]}},me:{m:{x:["MOMO","HAMID","UGO"]},s:{x:["MOMO","HAMID","UGO"]}},je:{m:{x:["MOMO","UGO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},ve:{m:{x:["MOMO","UGO","QUENTIN"]},s:{x:["MOMO","UGO","QUENTIN"]}},sa:{m:{x:["MOMO","HAMID"]},s:{x:["MOMO","HAMID","QUENTIN","JULIEN"]}},di:{m:{x:["MOMO","HAMID","QUENTIN"]},s:null}}),
-    W("03/08",{lu:{m:{x:["MOMO","QUENTIN"],n:"Pizza + froid / Salade du jour"},s:null},ma:{m:{x:["MOMO","QUENTIN"]},s:{x:["HAMID","QUENTIN","JULIEN"]}},me:{m:{x:["MOMO","HAMID"]},s:{x:["HAMID","QUENTIN","JULIEN"]}},je:{m:{x:["MOMO","QUENTIN"]},s:{x:["HAMID","QUENTIN","JULIEN"]}},ve:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN","JULIEN"]}},sa:{m:{x:["MOMO","HAMID"]},s:{x:["MOMO","HAMID","QUENTIN","JULIEN"]}},di:{m:{x:["MOMO","HAMID","QUENTIN"]},s:null}}),
-    W("10/08",{lu:{m:{x:["HAMID","QUENTIN"],n:"Salade du jour"},s:null},ma:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},me:{m:{x:["MOMO","HAMID"]},s:{x:["MOMO","HAMID","QUENTIN"]}},je:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},ve:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},sa:{m:{c:true},s:{c:true}},di:{m:{c:true},s:null}}),
-    W("17/08",{lu:{m:{x:["HAMID","QUENTIN"],n:"Salade du jour"},s:null},ma:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},me:{m:{x:["MOMO","HAMID"]},s:{x:["MOMO","HAMID","QUENTIN"]}},je:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},ve:{m:{x:["MOMO","QUENTIN"]},s:{x:["MOMO","HAMID","QUENTIN"]}},sa:{m:{x:["MOMO","HAMID"]},s:{x:["MOMO","HAMID","QUENTIN"]}},di:{m:{x:["MOMO","QUENTIN"]},s:null}}),
-  ];
-  const out={};
-  weeks.forEach(w=>{
-    const[dd,mm]=w.wl.split("/").map(Number);
-    const monday=new Date(2026,mm-1,dd);
-    jours.forEach((j,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);out[fmtDate(d)]=w.d[j];});
-  });
-  return out;
-}
-
-/* ============ STATE ============ */
-const DEFAULT_ROSTER = ["HAMID","MOMO","QUENTIN","UGO","JULIEN"];
-let scheduleData=buildDefaultSeed(), roster=DEFAULT_ROSTER.slice(), myName=null;
-
-function withTimeout(promise, ms){
-  return Promise.race([
-    promise,
-    new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
-  ]);
-}
-
-async function loadAll(){
-  // Identity is per-device, kept in localStorage (works on any static host)
-  try{ myName = localStorage.getItem(IDENTITY_LOCALSTORAGE_KEY) || null; }
-  catch(e){ myName = null; }
-
-  if(!firebaseOk) return; // no Firebase config yet — app still works with the local seed data
-
-  // Schedule
-  try{
-    const snap = await withTimeout(getDoc(doc(db, "planning", SCHEDULE_DOC)), 5000);
-    if(snap.exists() && snap.data() && snap.data().json){
-      const parsed = JSON.parse(snap.data().json);
-      if(parsed && Object.keys(parsed).length>0) scheduleData = parsed;
-    } else {
-      saveSchedule(); // first run: seed Firestore with default data
-    }
-  }catch(e){ console.warn("schedule load failed", e); }
-
-  // Roster
-  try{
-    const snap = await withTimeout(getDoc(doc(db, "planning", ROSTER_DOC)), 5000);
-    if(snap.exists() && snap.data() && snap.data().list && snap.data().list.length>0){
-      roster = snap.data().list;
-    } else {
-      saveRoster(); // first run: seed Firestore with default roster
-    }
-  }catch(e){ console.warn("roster load failed", e); }
-
-  // Live sync: if a teammate updates the schedule/roster, refresh the UI automatically
-  try{
-    onSnapshot(doc(db, "planning", SCHEDULE_DOC), (snap)=>{
-      if(snap.exists() && snap.data() && snap.data().json){
-        scheduleData = JSON.parse(snap.data().json);
-        if(document.getElementById('mainApp') && !document.getElementById('mainApp').classList.contains('hidden')){
-          renderToday(selectedDate || fmtDate(new Date()));
-          if(document.getElementById('view-week').classList.contains('active')) renderWeekView();
-        }
-      }
-    });
-    onSnapshot(doc(db, "planning", ROSTER_DOC), (snap)=>{
-      if(snap.exists() && snap.data() && snap.data().list){
-        roster = snap.data().list;
-        if(document.getElementById('view-team') && document.getElementById('view-team').classList.contains('active')) renderTeamView();
-      }
-    });
-  }catch(e){ console.warn("live sync setup failed", e); }
-}
-
-function saveSchedule(){
-  if(!firebaseOk) return Promise.resolve();
-  return setDoc(doc(db, "planning", SCHEDULE_DOC), { json: JSON.stringify(scheduleData) }).catch(e=>console.warn('save schedule failed', e));
-}
-function saveRoster(){
-  if(!firebaseOk) return Promise.resolve();
-  return setDoc(doc(db, "planning", ROSTER_DOC), { list: roster }).catch(e=>console.warn('save roster failed', e));
-}
-function saveIdentity(name){
-  myName=name;
-  try{ localStorage.setItem(IDENTITY_LOCALSTORAGE_KEY, name); }catch(e){ /* ignore */ }
-  return Promise.resolve();
-}
-
-
-function hamidIn(shift){ return shift && shift.x && myName && shift.x.includes(myName); }
-
-/* ============ ONBOARDING ============ */
-function renderOnboarding(){
-  const el=document.getElementById('obRoster');
-  el.innerHTML='';
-  roster.forEach(n=>{
-    const p=document.createElement('div');
-    p.className='roster-pill'+(n===pickedName?' picked':'');
-    p.textContent=n;
-    p.onclick=()=>{ pickedName=n; renderOnboarding(); document.getElementById('obContinue').disabled=false; };
-    el.appendChild(p);
-  });
-}
-let pickedName=null;
-
-document.getElementById('obAddBtn').addEventListener('click', ()=>{
-  const input=document.getElementById('obNewName');
-  const v=input.value.trim().toUpperCase();
-  if(!v) return;
-  if(!roster.includes(v)){ roster.push(v); saveRoster(); }
-  pickedName=v; input.value='';
-  renderOnboarding();
-  document.getElementById('obContinue').disabled=false;
-});
-
-document.getElementById('obContinue').addEventListener('click', ()=>{
-  if(!pickedName) return;
-  saveIdentity(pickedName);
-  startApp();
-});
-
-/* ============ VIEW SWITCHING ============ */
-function showView(name){
-  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-  document.getElementById('view-'+name).classList.add('active');
-  document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.view===name));
-  if(name==='week'){ renderWeekView(); renderPlanGrid(); }
-  if(name==='team') renderTeamView();
-}
-document.querySelectorAll('.navbtn').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.view)));
-
-document.getElementById('installBtn').addEventListener('click', async ()=>{
-  const promptEvent = window.__deferredInstallPrompt;
-  if(!promptEvent){ alert("Utilise le menu ⋮ du navigateur → « Installer l'application »"); return; }
-  promptEvent.prompt();
-  await promptEvent.userChoice;
-  window.__deferredInstallPrompt = null;
-  document.getElementById('installBtn').classList.add('hidden');
-});
-
-document.getElementById('meBadge').addEventListener('click', ()=>{
-  if(confirm("Changer de prénom ?")){
-    myName=null;
-    document.getElementById('mainApp').classList.add('hidden');
-    document.getElementById('bottomnav').classList.add('hidden');
-    document.getElementById('onboarding').classList.remove('hidden');
-    pickedName=null;
-    renderOnboarding();
-    document.getElementById('obContinue').disabled=true;
-  }
-});
-
-/* ============ TODAY VIEW ============ */
-let selectedDate=null;
-
-function renderToday(dateStr){
-  selectedDate=dateStr;
-  const d=new Date(dateStr+"T00:00:00");
-  document.getElementById('heroDateLabel').textContent = `${dayFullFr[d.getDay()]} ${d.getDate()} ${monthFr[d.getMonth()]}`;
-
-  const day=scheduleData[dateStr];
-  const pill=document.getElementById('statusPill');
-  const statusText=document.getElementById('statusText');
-  const big=document.getElementById('heroBig');
-
-  const worksMidi=hamidIn(day&&day.m), worksSoir=hamidIn(day&&day.s);
-  const closedAll = day && day.m && day.m.c && (!day.s || day.s.c);
-
-  if(!day){
-    pill.className='status-pill ferme'; statusText.textContent='Sans données'; big.textContent='—';
-  } else if(worksMidi||worksSoir){
-    pill.className='status-pill travail'; statusText.textContent='Tu travailles'; big.textContent='Bon service 🔥';
-  } else if(closedAll){
-    pill.className='status-pill ferme'; statusText.textContent='Fermé'; big.textContent='Restaurant fermé';
-  } else {
-    pill.className='status-pill repos'; statusText.textContent='Repos'; big.textContent='Journée off ✨';
-  }
-
-  const shiftsEl=document.getElementById('heroShifts');
-  shiftsEl.innerHTML='';
-  ['m','s'].forEach(k=>{
-    const shift = day ? day[k] : null;
-    const icon = k==='m'?'☀️':'🌙';
-    const lbl = k==='m'?'Midi':'Soir';
-    let inner = `<div class="icon">${icon}</div><div class="body"><div class="lbl">${lbl}</div>`;
-    if(!shift){ inner += `<div style="color:var(--muted2);font-size:13px;">—</div>`; }
-    else if(shift.c){ inner += `<div style="color:var(--muted);font-weight:700;font-size:13px;">Fermé</div>`; }
-    else {
-      inner += '<div class="names-wrap">' + shift.x.map(n=>`<span class="name-chip${n===myName?' me':''}">${n}</span>`).join('') + '</div>';
-      if(shift.n) inner += `<div class="note-line">✎ ${shift.n}</div>`;
-    }
-    inner += '</div>';
-    const row=document.createElement('div'); row.className='shift-line'; row.innerHTML=inner;
-    shiftsEl.appendChild(row);
-  });
-
-  renderDaystrip(dateStr);
-}
-
-function renderDaystrip(centerStr){
-  const el=document.getElementById('daystrip'); el.innerHTML='';
-  const center=new Date(centerStr+"T00:00:00");
-  const dow=center.getDay(); const diff=dow===0?-6:1-dow;
-  const monday=new Date(center); monday.setDate(center.getDate()+diff);
-  const todayStr=fmtDate(new Date());
-
-  for(let i=0;i<7;i++){
-    const d=new Date(monday); d.setDate(monday.getDate()+i);
-    const ds=fmtDate(d);
-    const day=scheduleData[ds];
-    const works=day&&(hamidIn(day.m)||hamidIn(day.s));
-    const chip=document.createElement('div');
-    chip.className='daychip'+(works?' works':'')+(ds===selectedDate?' selected':'');
-    chip.innerHTML=`<div class="dn">${joursLabel[jours[i]].slice(0,2)}</div><div class="dd">${d.getDate()}</div><div class="indicator"></div>`;
-    chip.onclick=()=>renderToday(ds);
-    el.appendChild(chip);
-  }
-}
-
-/* ============ MULTI-WEEK PLANNING GRID ============ */
-let gridWindowStart = null; // Monday date-string of the first week shown
-const GRID_WEEKS = 4;
-
-function mondayOf(dateStr){
-  const d = new Date(dateStr+"T00:00:00");
-  const dow = d.getDay(); const diff = dow===0?-6:1-dow;
-  d.setDate(d.getDate()+diff);
-  return fmtDate(d);
-}
-function addDays(dateStr, n){
-  const d = new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+n); return fmtDate(d);
-}
-
-function renderPlanGrid(){
-  if(!gridWindowStart) gridWindowStart = mondayOf(selectedDate || fmtDate(new Date()));
-
-  const firstMonday = gridWindowStart;
-  const lastMonday = addDays(firstMonday, (GRID_WEEKS-1)*7);
-  const lastSunday = addDays(lastMonday, 6);
-  const fmtShort = (ds)=>{ const d=new Date(ds+"T00:00:00"); return `${d.getDate()} ${monthFr[d.getMonth()].slice(0,3)}`; };
-  document.getElementById('gridRangeLabel').textContent = `${fmtShort(firstMonday)} → ${fmtShort(lastSunday)}`;
-
-  const table = document.getElementById('planGrid');
-  let html = '<tr><th></th>';
-  jours.forEach(j=> html += `<th>${joursLabel[j].slice(0,3)}</th>`);
-  html += '</tr>';
-
-  for(let w=0; w<GRID_WEEKS; w++){
-    const monday = addDays(firstMonday, w*7);
-    ['m','s'].forEach((shiftKey, si)=>{
-      html += '<tr>';
-      if(si===0){
-        html += `<td class="plan-wk-cell" rowspan="2">
-          <div class="plan-wk-label">Sem. du ${fmtShort(monday)}</div>
-          <button class="plan-wk-dup" data-monday="${monday}">📋 → semaine suiv.</button>
-        </td>`;
-      }
-      jours.forEach((j,i)=>{
-        const ds = addDays(monday, i);
-        const day = scheduleData[ds];
-        const shift = day ? day[shiftKey] : null;
-        let cellHtml;
-        if(!shift){ cellHtml = '<span class="pc-empty">—</span>'; }
-        else if(shift.c){ cellHtml = '<span class="pc-closed">Fermé</span>'; }
-        else{
-          const isMe = shift.x.includes(myName);
-          cellHtml = `<div class="pc-names${isMe?' me':''}">${shift.x.join(', ')}</div>`;
-        }
-        html += `<td><div class="plan-cell" data-date="${ds}"><div class="pc-shift">${shiftKey==='m'?'Midi':'Soir'}</div>${cellHtml}</div></td>`;
-      });
-      html += '</tr>';
-    });
-  }
-  table.innerHTML = html;
-
-  table.querySelectorAll('.plan-cell').forEach(cell=>{
-    cell.addEventListener('click', ()=>{
-      const ds = cell.dataset.date;
-      document.getElementById('editDate').value = ds;
-      document.getElementById('editDate').dispatchEvent(new Event('change'));
-      document.getElementById('editDate').scrollIntoView({behavior:'smooth', block:'center'});
-    });
-  });
-
-  table.querySelectorAll('.plan-wk-dup').forEach(btn=>{
-    btn.addEventListener('click', async (e)=>{
-      e.stopPropagation();
-      const monday = btn.dataset.monday;
-      const nextMonday = addDays(monday, 7);
-      for(let i=0;i<7;i++){
-        const src = addDays(monday, i);
-        const dst = addDays(nextMonday, i);
-        if(scheduleData[src]) scheduleData[dst] = JSON.parse(JSON.stringify(scheduleData[src]));
-      }
-      await saveSchedule();
-      renderPlanGrid();
-      renderWeekView();
-    });
-  });
-}
-
-document.getElementById('gridPrev').addEventListener('click', ()=>{
-  gridWindowStart = addDays(gridWindowStart, -GRID_WEEKS*7);
-  renderPlanGrid();
-});
-document.getElementById('gridNext').addEventListener('click', ()=>{
-  gridWindowStart = addDays(gridWindowStart, GRID_WEEKS*7);
-  renderPlanGrid();
-});
-
-/* ============ WEEK VIEW ============ */
-function renderWeekView(){
-  const el=document.getElementById('weekList'); el.innerHTML='';
-  const center=new Date(selectedDate+"T00:00:00");
-  const dow=center.getDay(); const diff=dow===0?-6:1-dow;
-  const monday=new Date(center); monday.setDate(center.getDate()+diff);
-
-  for(let i=0;i<7;i++){
-    const d=new Date(monday); d.setDate(monday.getDate()+i);
-    const ds=fmtDate(d);
-    const day=scheduleData[ds];
-    const card=document.createElement('div'); card.className='week-day-card';
-    let html=`<div class="wdc-head"><span class="wdc-day">${dayFullFr[d.getDay()]}</span><span class="wdc-date">${d.getDate()} ${monthFr[d.getMonth()]}</span></div>`;
-    ['m','s'].forEach(k=>{
-      const shift=day?day[k]:null;
-      html+=`<div class="wdc-row"><span class="tag-time">${k==='m'?'Midi':'Soir'}</span>`;
-      if(!shift) html+='<span style="color:var(--muted2);">—</span>';
-      else if(shift.c) html+='<span style="color:var(--muted);font-weight:700;">Fermé</span>';
-      else html+='<span class="names-wrap">'+shift.x.map(n=>`<span class="name-chip${n===myName?' me':''}">${n}</span>`).join('')+'</span>';
-      html+='</div>';
-    });
-    card.innerHTML=html;
-    el.appendChild(card);
-  }
-}
-
-document.getElementById('editDate').addEventListener('change', e=>{
-  const ds=e.target.value; const day=scheduleData[ds];
-  document.getElementById('editMidi').value = day&&day.m ? (day.m.c?'fermé':day.m.x.join(', ')) : '';
-  document.getElementById('editSoir').value = day&&day.s ? (day.s.c?'fermé':day.s.x.join(', ')) : '';
-  document.getElementById('editNote').value = day&&day.m&&day.m.n ? day.m.n : '';
-});
-function parseManualShift(text){
-  const t=text.trim(); if(!t) return null;
-  if(t.toLowerCase()==='fermé'||t.toLowerCase()==='ferme') return {c:true};
-  return {x:t.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean)};
-}
-document.getElementById('btnSaveManual').addEventListener('click', async ()=>{
-  const ds=document.getElementById('editDate').value;
-  const statusEl=document.getElementById('manualStatus');
-  if(!ds){ statusEl.className='status-msg err'; statusEl.textContent='Choisis une date.'; return; }
-  const m=parseManualShift(document.getElementById('editMidi').value);
-  const s=parseManualShift(document.getElementById('editSoir').value);
-  const note=document.getElementById('editNote').value.trim();
-  if(m&&note) m.n=note;
-  scheduleData[ds]={m,s};
-  await saveSchedule();
-  statusEl.className='status-msg ok'; statusEl.textContent="✓ Enregistré pour toute l'équipe.";
-  renderWeekView();
-  if(ds===selectedDate) renderToday(ds);
-});
-
-/* ============ TEAM VIEW ============ */
-function renderTeamView(){
-  const el=document.getElementById('teamList'); el.innerHTML='';
-  roster.forEach(n=>{
-    const row=document.createElement('div'); row.className='team-row';
-    row.innerHTML=`<div class="avatar">${n.slice(0,2)}</div><div class="nm">${n}${n===myName?' (toi)':''}</div><button class="rm">✕</button>`;
-    row.querySelector('.rm').onclick=async ()=>{
-      if(roster.length<=1) return;
-      roster=roster.filter(x=>x!==n);
-      await saveRoster();
-      renderTeamView();
-    };
-    el.appendChild(row);
-  });
-}
-document.getElementById('teamAddBtn').addEventListener('click', async ()=>{
-  const input=document.getElementById('teamNewName');
-  const v=input.value.trim().toUpperCase();
-  if(!v||roster.includes(v)) return;
-  roster.push(v); await saveRoster();
-  input.value=''; renderTeamView();
-});
-document.getElementById('btnCopyLink').addEventListener('click', ()=>{
-  navigator.clipboard.writeText(window.location.href).then(()=>{
-    const btn=document.getElementById('btnCopyLink');
-    const old=btn.textContent; btn.textContent='✓ Copié !';
-    setTimeout(()=>btn.textContent=old,1800);
-  }).catch(()=>{ alert("Copie manuelle : "+window.location.href); });
-});
-
-/* ============ INIT ============ */
-function startApp(){
-  document.getElementById('onboarding').classList.add('hidden');
-  document.getElementById('mainApp').classList.remove('hidden');
-  document.getElementById('bottomnav').classList.remove('hidden');
-  document.getElementById('meBadge').textContent = '👋 ' + myName;
-  const todayStr=fmtDate(new Date());
-  document.getElementById('editDate').value=todayStr;
-  renderToday(todayStr);
-}
-
-// Show onboarding immediately with default roster so the UI never appears blank,
-// then refresh silently once (if) storage responds.
-renderOnboarding();
-
-(async function init(){
-  await loadAll();
-  if(myName){
-    startApp();
-  } else {
-    renderOnboarding();
-  }
-})();
-</script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
