@@ -1,99 +1,47 @@
-# Planning Équipe
+# Planning — Le Comptoir
 
-اپ برنامه‌ی کاری تیم — یک وب‌اپ مستقل (PWA) با ذخیره‌سازی واقعی و همگام‌سازی زنده بین اعضای تیم، از طریق Firebase (رایگان).
+نسخه‌ی نهایی: طراحی کامل حفظ‌شده + امنیت واقعی سمت سرور (نه فقط ظاهری) + بدون پین/رمز برای کاربر.
 
-## ساختار فایل‌ها
-
+## فایل‌ها
 ```
-/
-├── index.html      ← کل اپ (UI + منطق + استایل) — بدون تغییر بصری
-├── manifest.json   ← تنظیمات نصب PWA (نام، آیکون، رنگ)
-├── sw.js           ← Service Worker (نصب + کش آفلاین ساده)
-├── icon-192.png    ← آیکون اپ (۱۹۲×۱۹۲)
-└── icon-512.png    ← آیکون اپ (۵۱۲×۵۱۲)
-```
-
-هیچ فایل build یا npm install لازم نیست — همه‌چیز static است، فقط یک تنظیم کوچک قبل از deploy لازم داری (پایین توضیح داده شده).
-
-## قدم ۱ — ساخت پروژه‌ی Firebase (رایگان، ۵ دقیقه)
-
-1. برو به https://console.firebase.google.com و با اکانت گوگل وارد شو
-2. **Add project** بزن → یک اسم بده (مثلاً `planning-equipe`) → مراحل رو تایید کن
-3. از منوی سمت چپ: **Build → Firestore Database → Create database**
-4. حالت را روی **Start in test mode** بگذار (برای شروع کافیه) → منطقه رو انتخاب کن → Enable
-5. برگرد به صفحه‌ی اصلی پروژه (آیکون خانه) → روی آیکون چرخ‌دنده (⚙️) → **Project settings**
-6. پایین صفحه، بخش **Your apps** → آیکون وب (`</>`) → یک اسم بده و **Register app**
-7. یک بلوک کد به‌نام `firebaseConfig` نشونت می‌ده — دقیقاً همون object رو کپی کن
-
-## قدم ۲ — وصل کردن config به پروژه
-
-فایل `index.html` رو باز کن، دنبال این بخش بگرد (نزدیک بالای تگ `<script type="module">`):
-
-```js
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+index.html      ← اپ کامل
+style.css       ← طراحی (بدون تغییر ظاهری)
+app.js          ← منطق + اتصال Firebase
+manifest.json   ← تنظیمات نصب PWA
+sw.js           ← Service Worker
+icon-192.png, icon-512.png
+firestore.rules.txt ← قوانین امنیتی (پایین توضیح داده شده)
 ```
 
-مقادیر `YOUR_...` رو با چیزی که از Firebase کپی کردی جایگزین کن و فایل رو ذخیره کن.
+## قدم ۱ — فعال کردن Anonymous Authentication
+۱. برو به `console.firebase.google.com` → پروژه‌ی `planning-equipe-44750`
+۲. از منو: **Build → Authentication → Get started**
+۳. تب **Sign-in method** → روی **Anonymous** بزن → **Enable** → Save
 
-## قدم ۳ — تنظیم دسترسی (امنیت پایه)
+## قدم ۲ — تنظیم قوانین امنیتی Firestore
+۱. **Build → Firestore Database → Rules**
+۲. کل محتوای فایل `firestore.rules.txt` رو کپی کن، جایگزین محتوای فعلی کن
+۳. **Publish**
 
-توی Firestore → تب **Rules**، این را جایگزین محتوای فعلی کن (اجازه‌ی خواندن/نوشتن فقط برای سند برنامه، ساده و کافی برای یک تیم کوچک):
+## قدم ۳ — انتشار روی گیت‌هاب
+دقیقاً مثل همیشه: همه‌ی فایل‌های بالا (بجز `firestore.rules.txt` که فقط مال خودته) رو توی ریپو آپلود کن، جایگزین نسخه‌ی قبلی.
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /planning/{docId} {
-      allow read, write: if true;
-    }
-  }
-}
-```
+## قدم ۴ — فعال‌سازی مدیرها (یک‌بار، برای هر مدیر)
+هر کدوم از ۴ مدیر (Hamid, Marla, Momo, Ugo) باید یک‌بار این کارو بکنن:
 
-⚠️ این حالت یعنی هر کسی که لینک سایتت رو داشته باشه می‌تونه برنامه رو ببینه و ویرایش کنه (بدون رمز عبور) — برای یک تیم کوچک و داخلی معمولاً کافیه، ولی اگه بعداً خواستی محدودترش کنیم (مثلاً با رمز ساده)، بگو تا اضافه کنم.
+۱. لینک اپ رو باز کنن
+۲. اسم خودشونو انتخاب کنن، وارد اپ بشن
+۳. بالا سمت راست روی **آیکون خودشون** (مثلاً دایره‌ی H) بزنن → میره به «Mon profil»
+۴. یه بخش «Activation manager» می‌بینن با یه کد طولانی (Identifiant appareil) — دکمه‌ی «Copier l'identifiant» رو بزنن
+۵. اون کد رو برای Hamid بفرستن (تلگرام/واتساپ)
 
-## قدم ۴ — تست محلی (اختیاری)
+بعد از جمع‌شدن هر ۴ کد، Hamid باید:
+۱. `console.firebase.google.com` → `Firestore Database` → `Data`
+۲. کالکشن `planning` → سند `admins` رو باز کنه
+۳. فیلد `uids` رو ویرایش کنه (Edit field) → آرایه‌ست → هر ۴ کد رو به‌عنوان ۴ عنصر جدا اضافه کنه
+۴. Update
 
-```bash
-cd planning-equipe
-python3 -m http.server 8000
-# در مرورگر باز کن: http://localhost:8000
-```
+از همون لحظه، هر ۴ نفر روی همون گوشی‌هاشون **برای همیشه و خودکار** دسترسی مدیریت کامل دارن — دیگه هیچ‌وقت نیازی به تکرار این کار نیست، مگر گوشیشونو عوض کنن.
 
-## قدم ۵ — Deploy
-
-### Vercel
-1. https://vercel.com → Add New Project → پوشه رو آپلود کن یا از GitHub وصل کن
-2. Framework: **Other**، Build Command خالی، Output Directory: `.`
-3. Deploy → لینک دائمی مثل `https://planning-equipe.vercel.app`
-
-### Netlify
-1. https://netlify.com → Add new site → Deploy manually
-2. پوشه رو Drag & Drop کن → همون لحظه لینک می‌گیری
-
-### GitHub Pages
-```bash
-git init
-git add .
-git commit -m "Planning Équipe"
-git branch -M main
-git remote add origin https://github.com/USERNAME/planning-equipe.git
-git push -u origin main
-```
-سپس: Settings → Pages → Source: branch `main`، پوشه `/root` → لینک: `https://USERNAME.github.io/planning-equipe/`
-
-## بعد از deploy
-
-- داده‌ها الان واقعاً بین همه‌ی اعضای تیم که لینک رو دارن **زنده و همگام** ذخیره می‌شن (هرکی آپلود یا ویرایش کنه، بقیه فوراً می‌بینن، بدون رفرش)
-- چون دامنه واقعی و مستقله، این بار کروم معیارهای نصب PWA رو کامل تشخیص می‌ده و دکمه‌ی «Install app» طبیعی ظاهر می‌شه
-- هویت («من کی‌ام») روی خود گوشی هرکس ذخیره می‌شه (نه در Firebase)، پس هرکی فقط برنامه‌ی خودش رو با رنگ قرمز می‌بینه
-
-اگه در هر قدمی گیر کردی، دقیقاً همون خطا یا اسکرین‌شات رو بفرست تا کمک کنم.
-
+## نکته‌ی امنیتی مهم
+این سیستم واقعاً سمت سرور چک می‌شه (نه فقط مخفی‌کردن دکمه‌ها توی ظاهر اپ) — یعنی حتی اگه یکی با ابزار فنی بخواد مستقیم به دیتابیس دستور بده، Firebase خودش رد می‌کنه چون گوشیش توی لیست `admins` نیست. تنها کسی که می‌تونه لیست مدیرها رو عوض کنه، خود Hamid از طریق کنسول Firebase — نه از داخل اپ.

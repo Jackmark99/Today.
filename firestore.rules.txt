@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null &&
+        request.auth.uid in get(/databases/$(database)/documents/planning/admins).data.uids;
+    }
+
+    match /planning/schedule {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /planning/roster {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // The admins list itself can only be changed by you, manually,
+    // in the Firebase Console (Firestore → planning → admins).
+    // No app user — not even an admin — can write to it from the app.
+    match /planning/admins {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

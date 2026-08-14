@@ -1,9 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 /* ============================================================
-   FIREBASE CONFIG — same project used by the previous version,
-   so all schedule/roster data already entered carries over.
+   FIREBASE CONFIG — same project as before, data carries over.
    ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyB4TbEW1hsuJSDznTtAdTnjpkc5j16BR7U",
@@ -14,17 +14,18 @@ const firebaseConfig = {
   appId: "1:458088730695:web:b4206e8b51902b055b2162"
 };
 
-let db = null, firebaseOk = false;
+let db = null, auth = null, firebaseOk = false, myUid = null;
 try{
   const fbApp = initializeApp(firebaseConfig);
   db = getFirestore(fbApp);
+  auth = getAuth(fbApp);
   firebaseOk = true;
 }catch(e){ console.warn("Firebase init failed", e); }
 
 /* ============ CONSTANTS ============ */
 const jours = ["lu","ma","me","je","ve","sa","di"];
 const joursLabelShort = {lu:"Lu",ma:"Ma",me:"Me",je:"Je",ve:"Ve",sa:"Sa",di:"Di"};
-const joursLabelFull = {lu:"lundi",ma:"mardi",me:"mercredi",je:"jeudi",ve:"vendredi",sa:"samedi",di:"dimanche"};
+const joursLabelUC = {lu:"LUN",ma:"MAR",me:"MER",je:"JEU",ve:"VEN",sa:"SAM",di:"DIM"};
 const monthFr = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
 const dayFullFr = ["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"];
 const IDENTITY_KEY = "planning-identity";
@@ -34,7 +35,7 @@ function fmtDate(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(
 function addDays(dateStr, n){ const d = new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+n); return fmtDate(d); }
 function mondayOf(dateStr){ const d = new Date(dateStr+"T00:00:00"); const dow = d.getDay(); const diff = dow===0?-6:1-dow; d.setDate(d.getDate()+diff); return fmtDate(d); }
 
-/* ============ DEFAULT SEED (matches the demo week shown in the mockup) ============ */
+/* ============ DEFAULT SEED ============ */
 function buildDefaultSeed(){
   const W = (wl, d) => ({wl, d});
   const weeks = [
@@ -58,22 +59,42 @@ function buildDefaultSeed(){
 }
 const DEFAULT_ROSTER = [
   {name:"HAMID", role:"salle"},
-  {name:"MOMO", role:"salle"},
+  {name:"MARLA", role:"salle"},
+  {name:"MOMO", role:"cuisine"},
+  {name:"UGO", role:"cuisine"},
   {name:"QUENTIN", role:"cuisine"},
   {name:"LEA", role:"salle"},
   {name:"SAMI", role:"cuisine"},
 ];
+const DEFAULT_ADMIN_NAMES = ["HAMID","MARLA","MOMO","UGO"];
 
 /* ============ STATE ============ */
 let scheduleData = buildDefaultSeed();
 let roster = DEFAULT_ROSTER.slice();
+let adminUids = []; // read-only from Firestore, only editable via Firebase Console
 let myName = null;
 let selectedDate = fmtDate(new Date());
 let weekWindowStart = mondayOf(selectedDate);
 let teamFilterRole = "all";
+let sheetContext = null; // {date, shiftKey}
+
+function isAdmin(){ return myUid && adminUids.includes(myUid); }
 
 function withTimeout(p, ms){ return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))]); }
 
+/* ============ AUTH ============ */
+function initAuth(){
+  return new Promise((resolve)=>{
+    if(!firebaseOk){ resolve(); return; }
+    onAuthStateChanged(auth, user=>{
+      if(user){ myUid = user.uid; resolve(); }
+    });
+    signInAnonymously(auth).catch(e=>{ console.warn("anon auth failed", e); resolve(); });
+    setTimeout(resolve, 4000); // never block the UI forever
+  });
+}
+
+/* ============ LOAD / SAVE ============ */
 async function loadAll(){
   try{ myName = localStorage.getItem(IDENTITY_KEY) || null; }catch(e){ myName = null; }
   if(!firebaseOk) return;
@@ -94,6 +115,16 @@ async function loadAll(){
   }catch(e){ console.warn("roster load failed", e); }
 
   try{
+    const snap = await withTimeout(getDoc(doc(db, "planning", "admins")), 5000);
+    if(snap.exists() && snap.data() && Array.isArray(snap.data().uids)){
+      adminUids = snap.data().uids;
+    } else {
+      // First run: seed the admins doc (editable later only via Firebase Console per the security rules)
+      setDoc(doc(db,"planning","admins"), {uids: []}).catch(()=>{});
+    }
+  }catch(e){ console.warn("admins load failed", e); }
+
+  try{
     onSnapshot(doc(db, "planning", "schedule"), snap=>{
       if(snap.exists() && snap.data() && snap.data().json){
         scheduleData = JSON.parse(snap.data().json);
@@ -106,23 +137,25 @@ async function loadAll(){
         if(!document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
       }
     });
+    onSnapshot(doc(db, "planning", "admins"), snap=>{
+      if(snap.exists() && snap.data() && Array.isArray(snap.data().uids)){
+        adminUids = snap.data().uids;
+        if(!document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
+      }
+    });
   }catch(e){ console.warn("live sync failed", e); }
 }
-function saveSchedule(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","schedule"), {json: JSON.stringify(scheduleData)}).catch(e=>console.warn(e)); }
-function saveRoster(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","roster"), {list: roster}).catch(e=>console.warn(e)); }
+function saveSchedule(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","schedule"), {json: JSON.stringify(scheduleData)}).catch(e=>{ console.warn(e); showToast("Échec de l'enregistrement — vérifie ta connexion"); }); }
+function saveRoster(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","roster"), {list: roster}).catch(e=>{ console.warn(e); showToast("Échec de l'enregistrement — vérifie ta connexion"); }); }
 function saveIdentity(name){ myName = name; try{ localStorage.setItem(IDENTITY_KEY, name); }catch(e){} }
 
 function hamidIn(shift){ return shift && shift.x && myName && shift.x.includes(myName); }
-function personOf(name){ return roster.find(p=>p.name===name) || {name, role:"salle"}; }
 function colorVarFor(name){
   const idx = roster.findIndex(p=>p.name===name);
   const n = idx>=0 ? idx : 0;
   return `var(--p-${(n%6)+1})`;
 }
-function avatarStyle(name){
-  if(name===myName) return `background:var(--me)`;
-  return `background:${colorVarFor(name)}`;
-}
+function avatarStyle(name){ return name===myName ? `background:var(--me)` : `background:${colorVarFor(name)}`; }
 function initial(name){ return (name||"?").trim().charAt(0).toUpperCase(); }
 
 /* ============ TOAST ============ */
@@ -197,11 +230,17 @@ function enterApp(){
   document.getElementById('onboardingStage').classList.add('is-hidden');
   document.getElementById('mainStage').classList.remove('is-hidden');
   document.getElementById('meAvatar').textContent = initial(myName);
-  document.getElementById('meAvatar').style.background = 'var(--me)';
   document.getElementById('meLabel').textContent = myName;
+  goToTab('today');
   renderAll();
 }
 document.getElementById('meChip').addEventListener('click', ()=>{
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('is-active'));
+  document.querySelectorAll('.view').forEach(v=> v.classList.toggle('is-hidden', v.dataset.view!=='profile'));
+  document.getElementById('scroll').scrollTop = 0;
+  renderProfile();
+});
+document.getElementById('pfSwitchBtn').addEventListener('click', ()=>{
   document.getElementById('mainStage').classList.add('is-hidden');
   document.getElementById('onboardingStage').classList.remove('is-hidden');
   pickedName = null;
@@ -210,13 +249,15 @@ document.getElementById('meChip').addEventListener('click', ()=>{
 });
 
 /* ============ TABS ============ */
+function goToTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('is-active', t.dataset.tab===name));
+  document.querySelectorAll('.view').forEach(v=> v.classList.toggle('is-hidden', v.dataset.view!==name));
+  document.getElementById('scroll').scrollTop = 0;
+}
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click', ()=>{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('is-active'));
-    tab.classList.add('is-active');
     const name = tab.dataset.tab;
-    document.querySelectorAll('.view').forEach(v=> v.classList.toggle('is-hidden', v.dataset.view!==name));
-    document.getElementById('scroll').scrollTop = 0;
+    goToTab(name);
     if(name==='week') renderWeek();
     if(name==='team') renderTeam();
   });
@@ -255,6 +296,8 @@ function renderToday(){
     sub.textContent = 'Profite bien.';
   }
 
+  renderNextService();
+
   const split = document.getElementById('todaySplit');
   split.innerHTML = '';
   ['m','s'].forEach(k=>{
@@ -274,19 +317,37 @@ function renderToday(){
     split.appendChild(slot);
   });
 
-  const noteWrap = document.getElementById('noteWrap');
-  const note = (day && day.m && day.m.n) ? day.m.n : (day && day.s && day.s.n ? day.s.n : '');
-  if(note){ noteWrap.style.display = 'flex'; document.getElementById('noteTxt').textContent = note; }
-  else{ noteWrap.style.display = 'none'; }
-
   renderDayStrip();
+}
+
+function renderNextService(){
+  const wrap = document.getElementById('nextWrap');
+  const txt = document.getElementById('nextTxt');
+  // find the next upcoming shift (today or later) that includes myName
+  for(let i=0;i<14;i++){
+    const ds = addDays(fmtDate(new Date()), i);
+    const day = scheduleData[ds];
+    if(!day) continue;
+    for(const k of ['m','s']){
+      const shift = day[k];
+      if(shift && shift.x && shift.x.includes(myName)){
+        const d = new Date(ds+"T00:00:00");
+        const isToday = ds===fmtDate(new Date());
+        const when = isToday ? (k==='m'?"aujourd'hui midi":"ce soir") : `${dayFullFr[d.getDay()]} ${d.getDate()} ${k==='m'?'midi':'soir'}`;
+        const others = shift.x.filter(n=>n!==myName);
+        wrap.style.display = 'flex';
+        txt.innerHTML = `<b>Prochain service</b>${k==='m'?'☀️':'🌙'} ${when.charAt(0).toUpperCase()+when.slice(1)}` + (others.length?` avec ${others.join(' et ')}`:'');
+        return;
+      }
+    }
+  }
+  wrap.style.display = 'none';
 }
 
 function renderDayStrip(){
   const el = document.getElementById('dayStrip');
   el.innerHTML = '';
   const monday = mondayOf(selectedDate);
-  const todayStr = fmtDate(new Date());
   for(let i=0;i<7;i++){
     const ds = addDays(monday, i);
     const day = scheduleData[ds];
@@ -300,7 +361,6 @@ function renderDayStrip(){
   }
 }
 
-/* ============ SHARE ============ */
 document.getElementById('shareBtn').addEventListener('click', async ()=>{
   const day = scheduleData[selectedDate];
   const d = new Date(selectedDate+"T00:00:00");
@@ -316,7 +376,7 @@ document.getElementById('shareBtn').addEventListener('click', async ()=>{
   try{
     if(navigator.share){ await navigator.share({title:'Planning', text}); }
     else{ await navigator.clipboard.writeText(text); showToast('Copié — colle-le où tu veux'); }
-  }catch(e){ /* user cancelled share, ignore */ }
+  }catch(e){}
 });
 
 /* ============ WEEK VIEW ============ */
@@ -331,35 +391,62 @@ function renderWeek(){
   const grid = document.getElementById('wGrid');
   grid.innerHTML = '';
   const todayStr = fmtDate(new Date());
+  let myDaysCount = 0;
+
+  const dayCardsEl = document.getElementById('dayCards');
+  dayCardsEl.innerHTML = '';
+
   for(let i=0;i<7;i++){
     const ds = addDays(monday, i);
     const day = scheduleData[ds];
     const d = new Date(ds+"T00:00:00");
     const isToday = ds===todayStr;
     const closedAll = day && day.m && day.m.c && (!day.s || day.s.c);
+    if(day && (hamidIn(day.m) || hamidIn(day.s))) myDaysCount++;
+
+    // --- grid row ---
     const row = document.createElement('div');
     row.className = 'wrow' + (isToday?' today':'') + (closedAll?' rest':'');
     const cellHtml = (shift)=>{
       if(!shift) return '<span class="wdash">—</span>';
       if(shift.c) return '<span class="wdash">Fermé</span>';
-      return shift.x.map(n=>`<span class="av${n===myName?' is-me':''}" style="${avatarStyle(n)}" title="${n}">${initial(n)}</span>`).join('');
+      return shift.x.map(n=>`<span class="av sm${n===myName?' is-me':''}" style="${avatarStyle(n)}" title="${n}">${initial(n)}</span>`).join('');
     };
     row.innerHTML = `
       <div class="wday"><b>${joursLabelShort[jours[i]]}</b><span>${d.getDate()}</span></div>
       <div class="wcell">${cellHtml(day && day.m)}</div>
       <div class="wcell">${cellHtml(day && day.s)}</div>`;
-    row.addEventListener('click', ()=>{
-      document.getElementById('editDate').value = ds;
-      document.getElementById('editDate').dispatchEvent(new Event('change'));
-      document.getElementById('editCard').scrollIntoView({behavior:'smooth', block:'center'});
-    });
+    if(isAdmin()){
+      row.querySelector('.wcell:nth-child(2)').addEventListener('click', ()=> openSheet(ds, 'm'));
+      row.querySelector('.wcell:nth-child(3)').addEventListener('click', ()=> openSheet(ds, 's'));
+    }
     grid.appendChild(row);
+
+    // --- daily card ---
+    const card = document.createElement('div');
+    card.className = 'dcard' + (closedAll?' rest':'');
+    const rowHtml = (shift, label)=>{
+      let names;
+      if(!shift) names = '<span class="dcard-empty">Personne</span>';
+      else if(shift.c) names = '<span class="dcard-empty">Fermé</span>';
+      else names = shift.x.map(n=> n===myName ? `<span class="me">${n}</span>` : n).join(' · ');
+      return `<div class="dcard-row"><span class="lbl">${label}</span><span class="dcard-names">${names}</span></div>`;
+    };
+    card.innerHTML = `<div class="dcard-head"><b>${joursLabelUC[jours[i]]} ${d.getDate()}</b>${closedAll?'<span>fermé</span>':''}</div>`
+      + rowHtml(day && day.m, '☀️ Midi') + rowHtml(day && day.s, '🌙 Soir');
+    if(isAdmin()){
+      card.addEventListener('click', ()=> openSheet(ds, 'm'));
+    }
+    dayCardsEl.appendChild(card);
   }
+
+  document.getElementById('joursPourToi').innerHTML = `<b>${myDaysCount}</b> jour${myDaysCount>1?'s':''} pour toi cette semaine`;
 }
-document.getElementById('wPrev').addEventListener('click', ()=>{ weekWindowStart = addDays(weekWindowStart, -7); renderWeek(); renderTeamIfActive(); });
-document.getElementById('wNext').addEventListener('click', ()=>{ weekWindowStart = addDays(weekWindowStart, 7); renderWeek(); renderTeamIfActive(); });
+document.getElementById('wPrev').addEventListener('click', ()=>{ weekWindowStart = addDays(weekWindowStart, -7); renderWeek(); });
+document.getElementById('wNext').addEventListener('click', ()=>{ weekWindowStart = addDays(weekWindowStart, 7); renderWeek(); });
 
 document.getElementById('copyBtn').addEventListener('click', async ()=>{
+  if(!isAdmin()){ showToast("Seuls les managers peuvent modifier le planning"); return; }
   const nextMonday = addDays(weekWindowStart, 7);
   for(let i=0;i<7;i++){
     const src = addDays(weekWindowStart, i);
@@ -371,41 +458,77 @@ document.getElementById('copyBtn').addEventListener('click', async ()=>{
   renderWeek();
 });
 
-/* ---- manual edit ---- */
-document.getElementById('editDate').addEventListener('change', e=>{
-  const ds = e.target.value;
-  const day = scheduleData[ds];
-  document.getElementById('editMidi').value = day && day.m ? (day.m.c ? 'fermé' : day.m.x.join(', ')) : '';
-  document.getElementById('editSoir').value = day && day.s ? (day.s.c ? 'fermé' : day.s.x.join(', ')) : '';
-  document.getElementById('editNote').value = (day && day.m && day.m.n) ? day.m.n : '';
-});
-function parseManualShift(text){
-  const t = (text||'').trim();
-  if(!t) return null;
-  if(t.toLowerCase()==='fermé' || t.toLowerCase()==='ferme') return {c:true};
-  return {x: t.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean)};
+/* ============ SHIFT EDIT SHEET ============ */
+function openSheet(dateStr, shiftKey){
+  if(!isAdmin()) return;
+  sheetContext = {date: dateStr, shiftKey};
+  const d = new Date(dateStr+"T00:00:00");
+  document.getElementById('sheetTitle').textContent = `${dayFullFr[d.getDay()].charAt(0).toUpperCase()+dayFullFr[d.getDay()].slice(1)} ${d.getDate()} · ${shiftKey==='m'?'Midi':'Soir'}`;
+
+  const day = scheduleData[dateStr];
+  const shift = day ? day[shiftKey] : null;
+  const selectedNames = (shift && shift.x) ? shift.x.slice() : [];
+
+  const peopleEl = document.getElementById('sheetPeople');
+  peopleEl.innerHTML = '';
+  roster.forEach(p=>{
+    const isSel = selectedNames.includes(p.name);
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'pickcircle' + (isSel ? ' is-selected' : '');
+    el.innerHTML = `<span class="av lg" style="${p.name===myName?'background:var(--me)':`background:${colorVarFor(p.name)}`}">${initial(p.name)}</span><span>${p.name}</span>`;
+    el.addEventListener('click', ()=>{
+      if(el.classList.contains('is-selected')){
+        if(confirm(`Retirer ${p.name} de ce service ?`)){
+          el.classList.remove('is-selected');
+        }
+      } else {
+        el.classList.add('is-selected');
+      }
+    });
+    peopleEl.appendChild(el);
+  });
+
+  document.getElementById('sheetNote').value = (shift && shift.n) ? shift.n : '';
+
+  document.getElementById('sheetBackdrop').classList.add('show');
+  document.getElementById('sheet').classList.add('show');
 }
-document.getElementById('btnSaveManual').addEventListener('click', async ()=>{
-  const ds = document.getElementById('editDate').value;
-  if(!ds){ showToast('Choisis une date'); return; }
-  const m = parseManualShift(document.getElementById('editMidi').value);
-  const s = parseManualShift(document.getElementById('editSoir').value);
-  const note = document.getElementById('editNote').value.trim();
-  if(m && note) m.n = note;
-  scheduleData[ds] = {m, s};
+function closeSheet(){
+  document.getElementById('sheetBackdrop').classList.remove('show');
+  document.getElementById('sheet').classList.remove('show');
+  sheetContext = null;
+}
+document.getElementById('sheetBackdrop').addEventListener('click', closeSheet);
+
+document.getElementById('sheetDoneBtn').addEventListener('click', async ()=>{
+  if(!sheetContext || !isAdmin()) { closeSheet(); return; }
+  const selected = Array.from(document.querySelectorAll('#sheetPeople .pickcircle.is-selected'))
+    .map(el => el.querySelector('span:last-child').textContent);
+  const note = document.getElementById('sheetNote').value.trim();
+
+  const { date, shiftKey } = sheetContext;
+  const day = scheduleData[date] || {m:null, s:null};
+  if(selected.length===0){
+    day[shiftKey] = null;
+  } else {
+    day[shiftKey] = {x: selected};
+    if(note) day[shiftKey].n = note;
+  }
+  scheduleData[date] = day;
+
   await saveSchedule();
-  showToast('Jour enregistré \u2705');
+  showToast('Service mis à jour \u2705');
+  closeSheet();
   renderWeek();
-  if(ds===selectedDate) renderToday();
+  if(date===selectedDate) renderToday();
 });
 
 /* ============ TEAM VIEW ============ */
-function renderTeamIfActive(){
-  if(!document.querySelector('[data-view="team"]').classList.contains('is-hidden')) renderTeam();
-}
 function renderTeam(){
   renderEquity();
   renderPeople();
+  renderAddMember();
 }
 
 function renderEquity(){
@@ -453,15 +576,17 @@ function renderPeople(){
   el.innerHTML = '';
   const filtered = roster.filter(p=> teamFilterRole==='all' || p.role===teamFilterRole);
   filtered.forEach(p=>{
+    const admin = DEFAULT_ADMIN_NAMES.includes(p.name);
     const row = document.createElement('div');
     row.className = 'person';
     row.innerHTML = `
       <span class="av" style="${p.name===myName?'background:var(--me)':avatarStyle(p.name)}">${initial(p.name)}</span>
-      <div class="person-txt"><b>${p.name}</b><span class="role-badge">${p.role==='cuisine'?'Cuisine':'Salle'}</span></div>
-      ${p.name===myName ? '<span class="tagme">Toi</span>' : '<button class="icon-btn rm-person" aria-label="Retirer">✕</button>'}`;
-    if(p.name!==myName){
+      <div class="person-txt"><b>${p.name} ${admin?'<span class="manager-badge">Manager</span>':'<span class="member-badge">Membre</span>'}</b><span>${p.role==='cuisine'?'Cuisine':'Salle'}</span></div>
+      ${(p.name!==myName && isAdmin()) ? '<button class="icon-btn rm-person" aria-label="Retirer">✕</button>' : ''}`;
+    if(p.name!==myName && isAdmin()){
       row.querySelector('.rm-person').addEventListener('click', async ()=>{
         if(roster.length<=1) return;
+        if(!confirm(`Retirer ${p.name} de l'équipe ?`)) return;
         roster = roster.filter(x=>x.name!==p.name);
         await saveRoster();
         renderTeam();
@@ -480,30 +605,99 @@ document.querySelectorAll('#teamFilter .tf-btn').forEach(btn=>{
   });
 });
 
-let teamNewRole = 'salle';
-document.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(b=>b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    teamNewRole = btn.dataset.role;
+function renderAddMember(){
+  const zone = document.getElementById('addMemberZone');
+  if(!isAdmin()){ zone.innerHTML = ''; return; }
+  zone.innerHTML = `
+    <h2 class="sec-title">Ajouter un membre</h2>
+    <input type="text" id="teamNewName" class="ob-input" placeholder="Prénom">
+    <div class="ob-roletoggle" id="teamRoleToggle">
+      <button type="button" class="ob-role-btn is-active" data-role="salle">Salle</button>
+      <button type="button" class="ob-role-btn" data-role="cuisine">Cuisine</button>
+    </div>
+    <button class="btn btn-solid" id="teamAddBtn" style="width:100%;">Ajouter</button>`;
+  let teamNewRole = 'salle';
+  zone.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      zone.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(b=>b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      teamNewRole = btn.dataset.role;
+    });
   });
-});
-document.getElementById('teamAddBtn').addEventListener('click', async ()=>{
-  const input = document.getElementById('teamNewName');
-  const v = input.value.trim().toUpperCase();
-  if(!v || roster.find(p=>p.name===v)) return;
-  roster.push({name:v, role:teamNewRole});
-  await saveRoster();
-  input.value = '';
-  renderTeam();
-  showToast(`${v} ajouté(e) à l'équipe`);
-});
+  zone.querySelector('#teamAddBtn').addEventListener('click', async ()=>{
+    const input = zone.querySelector('#teamNewName');
+    const v = input.value.trim().toUpperCase();
+    if(!v || roster.find(p=>p.name===v)) return;
+    roster.push({name:v, role:teamNewRole});
+    await saveRoster();
+    input.value = '';
+    renderTeam();
+    showToast(`${v} ajouté(e) à l'équipe`);
+  });
+}
 
 document.getElementById('btnCopyLink').addEventListener('click', async ()=>{
-  try{
-    await navigator.clipboard.writeText(window.location.href);
-    showToast('Lien copié \u2705');
-  }catch(e){ showToast(window.location.href); }
+  try{ await navigator.clipboard.writeText(window.location.href); showToast('Lien copié \u2705'); }
+  catch(e){ showToast(window.location.href); }
+});
+
+/* ============ PROFILE VIEW ============ */
+function renderProfile(){
+  document.getElementById('pfAvatar').textContent = initial(myName);
+  document.getElementById('pfName').textContent = myName;
+  const me = roster.find(p=>p.name===myName);
+  document.getElementById('pfRoleLabel').textContent = (me && me.role==='cuisine') ? 'Cuisine' : 'Salle';
+  document.getElementById('pfNewName').value = '';
+
+  const adminZone = document.getElementById('pfAdminZone');
+  if(isAdmin() && myUid){
+    adminZone.innerHTML = `
+      <h2 class="sec-title">Identifiant appareil</h2>
+      <p class="hint tight">Déjà enregistré comme manager sur cet appareil.</p>
+      <div class="device-id-box">${myUid}</div>`;
+  } else if(DEFAULT_ADMIN_NAMES.includes(myName) && myUid){
+    adminZone.innerHTML = `
+      <h2 class="sec-title">Activation manager</h2>
+      <p class="hint tight">Envoie cet identifiant à la personne qui configure l'appli, pour activer tes droits manager sur cet appareil :</p>
+      <div class="device-id-box">${myUid}</div>
+      <button class="btn btn-ghost" id="copyUidBtn" style="width:100%;margin-top:8px;">Copier l'identifiant</button>`;
+    adminZone.querySelector('#copyUidBtn').addEventListener('click', async ()=>{
+      try{ await navigator.clipboard.writeText(myUid); showToast('Identifiant copié'); }
+      catch(e){ showToast(myUid); }
+    });
+  } else {
+    adminZone.innerHTML = '';
+  }
+}
+
+document.getElementById('pfRenameBtn').addEventListener('click', async ()=>{
+  const newName = document.getElementById('pfNewName').value.trim().toUpperCase();
+  if(!newName || newName===myName) return;
+  if(roster.find(p=>p.name===newName)){ showToast('Ce prénom existe déjà dans l\u2019équipe'); return; }
+
+  const oldName = myName;
+  // Update roster entry
+  const entry = roster.find(p=>p.name===oldName);
+  if(entry) entry.name = newName;
+  await saveRoster();
+
+  // Propagate through every schedule entry, past and future
+  Object.keys(scheduleData).forEach(ds=>{
+    const day = scheduleData[ds];
+    ['m','s'].forEach(k=>{
+      if(day && day[k] && day[k].x){
+        day[k].x = day[k].x.map(n=> n===oldName ? newName : n);
+      }
+    });
+  });
+  await saveSchedule();
+
+  saveIdentity(newName);
+  document.getElementById('meLabel').textContent = newName;
+  document.getElementById('meAvatar').textContent = initial(newName);
+  showToast('Prénom mis à jour partout \u2705');
+  renderProfile();
+  renderAll();
 });
 
 /* ============ RENDER ALL ============ */
@@ -511,21 +705,19 @@ function renderAll(){
   renderToday();
   if(!document.querySelector('[data-view="week"]').classList.contains('is-hidden')) renderWeek();
   if(!document.querySelector('[data-view="team"]').classList.contains('is-hidden')) renderTeam();
+  if(!document.querySelector('[data-view="profile"]').classList.contains('is-hidden')) renderProfile();
 }
 
 /* ============ PWA ============ */
 (function setupPWA(){
-  try{
-    if("serviceWorker" in navigator){
-      navigator.serviceWorker.register("sw.js").catch(()=>{});
-    }
-  }catch(e){}
+  try{ if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); } }catch(e){}
 })();
 
 /* ============ INIT ============ */
 (async function init(){
   initTheme();
   renderOnboarding();
+  await initAuth();
   await loadAll();
   renderOnboarding();
   if(myName){ enterApp(); }
