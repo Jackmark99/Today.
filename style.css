@@ -352,3 +352,15 @@ svg{display:block}
   font-family:monospace;color:var(--muted);word-break:break-all;margin-bottom:8px}
 .admin-note{font-size:12px;color:var(--muted);line-height:1.5;background:var(--surface-2);
   border-radius:var(--radius-md);padding:var(--space-3);margin-top:var(--space-2)}
+
+/* ---------- sheet shift toggle (Midi/Soir in one sheet) ---------- */
+.sheet-shifttoggle{display:flex;gap:6px;justify-content:center;margin:8px 0 2px}
+.sheet-shift-btn{padding:8px 16px;border-radius:var(--radius-full);border:1.5px solid var(--border);
+  background:var(--surface);font-weight:700;font-size:var(--text-xs);color:var(--muted);
+  transition:background var(--tr),color var(--tr),border-color var(--tr)}
+.sheet-shift-btn.is-active{background:var(--text);border-color:var(--text);color:var(--bg)}
+
+/* improved pick animation */
+.pickcircle .av{transition:border-color var(--tr),transform var(--tr),box-shadow var(--tr)}
+.pickcircle.is-selected .av{box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.pickcircle:active .av{transform:scale(0.94)}

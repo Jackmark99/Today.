@@ -459,15 +459,40 @@ document.getElementById('copyBtn').addEventListener('click', async ()=>{
 });
 
 /* ============ SHIFT EDIT SHEET ============ */
-function openSheet(dateStr, shiftKey){
+function openSheet(dateStr, initialShiftKey){
   if(!isAdmin()) return;
-  sheetContext = {date: dateStr, shiftKey};
-  const d = new Date(dateStr+"T00:00:00");
-  document.getElementById('sheetTitle').textContent = `${dayFullFr[d.getDay()].charAt(0).toUpperCase()+dayFullFr[d.getDay()].slice(1)} ${d.getDate()} · ${shiftKey==='m'?'Midi':'Soir'}`;
+  const day = scheduleData[dateStr] || {m:null, s:null};
+  sheetContext = {
+    date: dateStr,
+    shiftKey: initialShiftKey || 'm',
+    draft: {
+      m: day.m ? {x:(day.m.x||[]).slice(), n: day.m.n || ''} : null,
+      s: day.s ? {x:(day.s.x||[]).slice(), n: day.s.n || ''} : null,
+    }
+  };
+  document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(b=>
+    b.classList.toggle('is-active', b.dataset.shift===sheetContext.shiftKey));
+  renderSheetShift();
+  document.getElementById('sheetBackdrop').classList.add('show');
+  document.getElementById('sheet').classList.add('show');
+}
 
-  const day = scheduleData[dateStr];
-  const shift = day ? day[shiftKey] : null;
-  const selectedNames = (shift && shift.x) ? shift.x.slice() : [];
+function readSheetIntoDraft(){
+  if(!sheetContext) return;
+  const selected = Array.from(document.querySelectorAll('#sheetPeople .pickcircle.is-selected'))
+    .map(el => el.querySelector('span:last-child').textContent);
+  const note = document.getElementById('sheetNote').value.trim();
+  sheetContext.draft[sheetContext.shiftKey] = selected.length ? {x: selected, n: note} : null;
+}
+
+function renderSheetShift(){
+  const { date, shiftKey, draft } = sheetContext;
+  const d = new Date(date+"T00:00:00");
+  document.getElementById('sheetTitle').textContent =
+    `${dayFullFr[d.getDay()].charAt(0).toUpperCase()+dayFullFr[d.getDay()].slice(1)} ${d.getDate()} · ${shiftKey==='m'?'Midi':'Soir'}`;
+
+  const shift = draft[shiftKey];
+  const selectedNames = shift ? shift.x.slice() : [];
 
   const peopleEl = document.getElementById('sheetPeople');
   peopleEl.innerHTML = '';
@@ -479,9 +504,7 @@ function openSheet(dateStr, shiftKey){
     el.innerHTML = `<span class="av lg" style="${p.name===myName?'background:var(--me)':`background:${colorVarFor(p.name)}`}">${initial(p.name)}</span><span>${p.name}</span>`;
     el.addEventListener('click', ()=>{
       if(el.classList.contains('is-selected')){
-        if(confirm(`Retirer ${p.name} de ce service ?`)){
-          el.classList.remove('is-selected');
-        }
+        if(confirm(`Retirer ${p.name} de ce service ?`)){ el.classList.remove('is-selected'); }
       } else {
         el.classList.add('is-selected');
       }
@@ -489,11 +512,19 @@ function openSheet(dateStr, shiftKey){
     peopleEl.appendChild(el);
   });
 
-  document.getElementById('sheetNote').value = (shift && shift.n) ? shift.n : '';
-
-  document.getElementById('sheetBackdrop').classList.add('show');
-  document.getElementById('sheet').classList.add('show');
+  document.getElementById('sheetNote').value = shift ? (shift.n || '') : '';
 }
+
+document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(!sheetContext || btn.dataset.shift===sheetContext.shiftKey) return;
+    readSheetIntoDraft(); // keep whatever was being edited on the shift we're leaving
+    sheetContext.shiftKey = btn.dataset.shift;
+    document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(b=>b.classList.toggle('is-active', b===btn));
+    renderSheetShift();
+  });
+});
+
 function closeSheet(){
   document.getElementById('sheetBackdrop').classList.remove('show');
   document.getElementById('sheet').classList.remove('show');
@@ -503,19 +534,9 @@ document.getElementById('sheetBackdrop').addEventListener('click', closeSheet);
 
 document.getElementById('sheetDoneBtn').addEventListener('click', async ()=>{
   if(!sheetContext || !isAdmin()) { closeSheet(); return; }
-  const selected = Array.from(document.querySelectorAll('#sheetPeople .pickcircle.is-selected'))
-    .map(el => el.querySelector('span:last-child').textContent);
-  const note = document.getElementById('sheetNote').value.trim();
-
-  const { date, shiftKey } = sheetContext;
-  const day = scheduleData[date] || {m:null, s:null};
-  if(selected.length===0){
-    day[shiftKey] = null;
-  } else {
-    day[shiftKey] = {x: selected};
-    if(note) day[shiftKey].n = note;
-  }
-  scheduleData[date] = day;
+  readSheetIntoDraft();
+  const { date, draft } = sheetContext;
+  scheduleData[date] = { m: draft.m, s: draft.s };
 
   await saveSchedule();
   showToast('Service mis à jour \u2705');
@@ -577,11 +598,12 @@ function renderPeople(){
   const filtered = roster.filter(p=> teamFilterRole==='all' || p.role===teamFilterRole);
   filtered.forEach(p=>{
     const admin = DEFAULT_ADMIN_NAMES.includes(p.name);
+    const showBadge = p.name===myName ? '' : (admin?'<span class="manager-badge">Manager</span>':'<span class="member-badge">Membre</span>');
     const row = document.createElement('div');
     row.className = 'person';
     row.innerHTML = `
       <span class="av" style="${p.name===myName?'background:var(--me)':avatarStyle(p.name)}">${initial(p.name)}</span>
-      <div class="person-txt"><b>${p.name} ${admin?'<span class="manager-badge">Manager</span>':'<span class="member-badge">Membre</span>'}</b><span>${p.role==='cuisine'?'Cuisine':'Salle'}</span></div>
+      <div class="person-txt"><b>${p.name} ${showBadge}</b><span>${p.role==='cuisine'?'Cuisine':'Salle'}</span></div>
       ${(p.name!==myName && isAdmin()) ? '<button class="icon-btn rm-person" aria-label="Retirer">✕</button>' : ''}`;
     if(p.name!==myName && isAdmin()){
       row.querySelector('.rm-person').addEventListener('click', async ()=>{
