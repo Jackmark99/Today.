@@ -24,14 +24,13 @@
           <path d="M9 11h14M9 16h9M9 21h5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
         </svg>
         <h1 class="ob-title">Bienvenue 👋</h1>
-        <p class="ob-lead">Qui es-tu ? Choisis ton prénom — ou ajoute-le s'il n'est pas encore dans l'équipe.</p>
+        <p class="ob-lead">Qui es-tu ?</p>
         <div class="ob-chips" id="obChips"></div>
-        <div>
-          <input type="text" id="obNewName" class="ob-input" placeholder="Ton prénom">
-          <div class="ob-roletoggle" id="obRoleToggle">
-            <button type="button" class="ob-role-btn is-active" data-role="salle">Salle</button>
-            <button type="button" class="ob-role-btn" data-role="cuisine">Cuisine</button>
-          </div>
+        <div id="obEmptyState" style="display:none;" class="ob-empty">
+          Aucun membre pour l'instant. Demande à un manager de t'ajouter à l'équipe.
+        </div>
+        <div id="obAdminAddZone" style="display:none;">
+          <input type="text" id="obNewName" class="ob-input" placeholder="Prénom du nouveau membre">
           <button class="btn btn-ghost" id="obAddBtn" style="width:100%;">Ajouter à l'équipe</button>
         </div>
         <button class="btn btn-solid" id="obContinue" disabled style="margin-top:var(--space-4);">Continuer</button>
@@ -55,9 +54,14 @@
         </div>
         <div class="topbar-right">
           <button class="icon-btn" data-theme-toggle aria-label="Mode sombre"></button>
-          <button class="me-chip" id="meChip"><span class="av av-me" id="meAvatar">H</span><span id="meLabel">—</span></button>
+          <button class="me-chip" id="meChip"><span class="av av-me" id="meAvatar">?</span><span id="meLabel">—</span></button>
         </div>
       </header>
+
+      <div class="dept-toggle" id="deptToggle">
+        <button type="button" class="dept-btn is-active" data-dept="salle">🍽️ Salle</button>
+        <button type="button" class="dept-btn" data-dept="cuisine">👨‍🍳 Cuisine</button>
+      </div>
 
       <main class="scroll" id="scroll">
 
@@ -101,7 +105,7 @@
 
           <button class="btn btn-solid" id="copyBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 9V5a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2h-4M5 9h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8a2 2 0 012-2z"/></svg>
-            Copier vers la semaine suivante
+            Copier les jours vides vers la semaine suivante
           </button>
 
           <h2 class="sec-title">Détail par jour</h2>
@@ -112,15 +116,12 @@
         <!-- ============ TEAM ============ -->
         <section class="view is-hidden" data-view="team">
           <h2 class="sec-title first">Équité de la semaine</h2>
-          <p class="hint tight">Semaine affichée · midis et soirs par personne</p>
+          <p class="hint tight">Semaine affichée · midis et soirs · département actuel</p>
           <div class="equity" id="equity"></div>
 
-          <div class="team-filter" id="teamFilter">
-            <button class="tf-btn is-active" data-role="all">Tous</button>
-            <button class="tf-btn" data-role="salle">Salle</button>
-            <button class="tf-btn" data-role="cuisine">Cuisine</button>
-          </div>
+          <h2 class="sec-title">Équipe</h2>
           <div class="people" id="people"></div>
+          <div id="memberEditZone"></div>
 
           <div id="addMemberZone"></div>
 
@@ -135,14 +136,9 @@
         <section class="view is-hidden" data-view="profile">
           <h2 class="sec-title first">Mon profil</h2>
           <div class="profile-row">
-            <span class="av av-me" id="pfAvatar">H</span>
-            <div class="person-txt"><b id="pfName">—</b><span id="pfRoleLabel">—</span></div>
+            <span class="av av-me" id="pfAvatar">?</span>
+            <div class="person-txt"><b id="pfName">—</b></div>
           </div>
-
-          <h2 class="sec-title">Modifier mon prénom</h2>
-          <input type="text" id="pfNewName" class="ob-input" placeholder="Nouveau prénom">
-          <button class="btn btn-solid" id="pfRenameBtn" style="width:100%;">Enregistrer le nouveau prénom</button>
-          <p class="hint tight" style="margin-top:6px;">Ton prénom sera mis à jour partout dans le planning, passé et à venir.</p>
 
           <h2 class="sec-title">Changer de profil</h2>
           <button class="btn btn-ghost" id="pfSwitchBtn" style="width:100%;">Ce n'est pas moi — changer de profil</button>
@@ -176,7 +172,11 @@
           <button type="button" class="sheet-shift-btn is-active" data-shift="m">☀️ Midi</button>
           <button type="button" class="sheet-shift-btn" data-shift="s">🌙 Soir</button>
         </div>
-        <p class="sheet-sub">Touche un prénom pour l'ajouter ou le retirer</p>
+        <div class="sheet-statetoggle" id="sheetStateToggle">
+          <button type="button" class="sheet-state-btn is-active-open" data-state="open">Ouvert</button>
+          <button type="button" class="sheet-state-btn" data-state="closed">Fermé</button>
+        </div>
+        <p class="sheet-sub" id="sheetSub">Touche un prénom pour l'ajouter ou le retirer</p>
         <div class="sheet-people" id="sheetPeople"></div>
         <input type="text" id="sheetNote" class="ob-input sheet-note" placeholder="Note du service (optionnel)">
         <button class="btn btn-solid sheet-done" id="sheetDoneBtn">Terminé</button>

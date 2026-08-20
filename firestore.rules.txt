@@ -7,12 +7,16 @@ service cloud.firestore {
         request.auth.uid in get(/databases/$(database)/documents/planning/admins).data.uids;
     }
 
-    match /planning/schedule {
+    // Members: everyone can read (needed for onboarding + display names),
+    // only managers can create/update (add, rename, deactivate).
+    match /members/{memberId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    match /planning/roster {
+    // Days: everyone can read (needed to view the schedule),
+    // only managers can write (edit a service).
+    match /days/{dayId} {
       allow read: if true;
       allow write: if isAdmin();
     }
@@ -21,6 +25,18 @@ service cloud.firestore {
     // in the Firebase Console (Firestore → planning → admins).
     // No app user — not even an admin — can write to it from the app.
     match /planning/admins {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Legacy documents from the previous single-JSON architecture.
+    // No longer used by the app, kept readable in case you want to
+    // manually recover old data, but no longer writable.
+    match /planning/schedule {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /planning/roster {
       allow read: if true;
       allow write: if false;
     }

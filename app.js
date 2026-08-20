@@ -1,9 +1,11 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import {
+  getFirestore, doc, collection, getDoc, getDocs, setDoc, onSnapshot
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 /* ============================================================
-   FIREBASE CONFIG — same project as before, data carries over.
+   FIREBASE CONFIG — same project as before.
    ============================================================ */
 const firebaseConfig = {
   apiKey: "AIzaSyB4TbEW1hsuJSDznTtAdTnjpkc5j16BR7U",
@@ -28,134 +30,123 @@ const joursLabelShort = {lu:"Lu",ma:"Ma",me:"Me",je:"Je",ve:"Ve",sa:"Sa",di:"Di"
 const joursLabelUC = {lu:"LUN",ma:"MAR",me:"MER",je:"JEU",ve:"VEN",sa:"SAM",di:"DIM"};
 const monthFr = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
 const dayFullFr = ["dimanche","lundi","mardi","mercredi","jeudi","vendredi","samedi"];
-const IDENTITY_KEY = "planning-identity";
+const IDENTITY_KEY = "planning-member-id";
 const THEME_KEY = "planning-theme";
+const DEPT_KEY = "planning-dept";
 
 function fmtDate(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 function addDays(dateStr, n){ const d = new Date(dateStr+"T00:00:00"); d.setDate(d.getDate()+n); return fmtDate(d); }
 function mondayOf(dateStr){ const d = new Date(dateStr+"T00:00:00"); const dow = d.getDay(); const diff = dow===0?-6:1-dow; d.setDate(d.getDate()+diff); return fmtDate(d); }
-
-/* ============ DEFAULT SEED ============ */
-function buildDefaultSeed(){
-  const W = (wl, d) => ({wl, d});
-  const weeks = [
-    W("10/08", {
-      lu:{m:{x:["MOMO","QUENTIN"]}, s:{x:["HAMID","MOMO","QUENTIN"]}},
-      ma:{m:{x:["MOMO","QUENTIN"]}, s:{x:["HAMID","MOMO","QUENTIN"]}},
-      me:{m:{x:["LEA","SAMI"]}, s:{x:["MOMO","SAMI"], n:"Menu du jour"}},
-      je:{m:{x:["MOMO","QUENTIN"]}, s:{x:["HAMID","MOMO","QUENTIN"]}},
-      ve:{m:{x:["MOMO","QUENTIN"]}, s:{x:["HAMID","MOMO","QUENTIN"]}},
-      sa:{m:{x:["MOMO","HAMID"]}, s:{x:["HAMID","MOMO","QUENTIN"]}},
-      di:{m:{x:["LEA","QUENTIN"]}, s:null},
-    }),
-  ];
-  const out = {};
-  weeks.forEach(w=>{
-    const [dd,mm] = w.wl.split("/").map(Number);
-    const monday = new Date(2026, mm-1, dd);
-    jours.forEach((j,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); out[fmtDate(d)] = w.d[j]; });
-  });
-  return out;
-}
-const DEFAULT_ROSTER = [
-  {name:"HAMID", role:"salle"},
-  {name:"MARLA", role:"salle"},
-  {name:"MOMO", role:"cuisine"},
-  {name:"UGO", role:"cuisine"},
-  {name:"QUENTIN", role:"cuisine"},
-  {name:"LEA", role:"salle"},
-  {name:"SAMI", role:"cuisine"},
-];
-const DEFAULT_ADMIN_NAMES = ["HAMID","MARLA","MOMO","UGO"];
+function todayStr(){ return fmtDate(new Date()); }
 
 /* ============ STATE ============ */
-let scheduleData = buildDefaultSeed();
-let roster = DEFAULT_ROSTER.slice();
-let adminUids = []; // read-only from Firestore, only editable via Firebase Console
-let myName = null;
-let selectedDate = fmtDate(new Date());
+let members = {};        // memberId -> {name, active, createdAt, updatedAt}
+let daysCache = {};       // dateStr -> {salle:{m,s}, cuisine:{m,s}}
+let daySubs = {};         // dateStr -> unsubscribe fn
+let adminUids = [];       // read-only, editable only via Firebase Console
+let myMemberId = null;
+let currentDept = 'salle';
+let selectedDate = todayStr();
 let weekWindowStart = mondayOf(selectedDate);
-let teamFilterRole = "all";
-let sheetContext = null; // {date, shiftKey}
+let sheetContext = null;  // {date, shiftKey, dept, draft:{m,s}}
 
-function isAdmin(){ return myUid && adminUids.includes(myUid); }
-
+function isAdmin(){ return !!(myUid && adminUids.includes(myUid)); }
+function myName(){ const m = members[myMemberId]; return m ? m.name : null; }
+function activeMembers(){ return Object.entries(members).filter(([id,m])=>m.active!==false).map(([id,m])=>({id,...m})); }
+function memberName(id){ const m = members[id]; return m ? m.name : '?'; }
 function withTimeout(p, ms){ return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))]); }
 
 /* ============ AUTH ============ */
 function initAuth(){
   return new Promise((resolve)=>{
     if(!firebaseOk){ resolve(); return; }
-    onAuthStateChanged(auth, user=>{
-      if(user){ myUid = user.uid; resolve(); }
-    });
+    onAuthStateChanged(auth, user=>{ if(user){ myUid = user.uid; resolve(); } });
     signInAnonymously(auth).catch(e=>{ console.warn("anon auth failed", e); resolve(); });
-    setTimeout(resolve, 4000); // never block the UI forever
+    setTimeout(resolve, 4000);
   });
 }
 
-/* ============ LOAD / SAVE ============ */
-async function loadAll(){
-  try{ myName = localStorage.getItem(IDENTITY_KEY) || null; }catch(e){ myName = null; }
+/* ============ MEMBERS ============ */
+function subscribeMembers(){
   if(!firebaseOk) return;
-
   try{
-    const snap = await withTimeout(getDoc(doc(db, "planning", "schedule")), 5000);
-    if(snap.exists() && snap.data() && snap.data().json){
-      const parsed = JSON.parse(snap.data().json);
-      if(parsed && Object.keys(parsed).length>0) scheduleData = parsed;
-    } else { saveSchedule(); }
-  }catch(e){ console.warn("schedule load failed", e); }
-
-  try{
-    const snap = await withTimeout(getDoc(doc(db, "planning", "roster")), 5000);
-    if(snap.exists() && snap.data() && snap.data().list && snap.data().list.length>0){
-      roster = snap.data().list.map(m => typeof m === "string" ? {name:m, role:"salle"} : m);
-    } else { saveRoster(); }
-  }catch(e){ console.warn("roster load failed", e); }
-
-  try{
-    const snap = await withTimeout(getDoc(doc(db, "planning", "admins")), 5000);
-    if(snap.exists() && snap.data() && Array.isArray(snap.data().uids)){
-      adminUids = snap.data().uids;
-    } else {
-      // First run: seed the admins doc (editable later only via Firebase Console per the security rules)
-      setDoc(doc(db,"planning","admins"), {uids: []}).catch(()=>{});
-    }
-  }catch(e){ console.warn("admins load failed", e); }
-
-  try{
-    onSnapshot(doc(db, "planning", "schedule"), snap=>{
-      if(snap.exists() && snap.data() && snap.data().json){
-        scheduleData = JSON.parse(snap.data().json);
-        if(!document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
+    onSnapshot(collection(db,"members"), snap=>{
+      const next = {};
+      snap.forEach(d=> next[d.id] = d.data());
+      members = next;
+      if(document.getElementById('onboardingStage') && !document.getElementById('onboardingStage').classList.contains('is-hidden')){
+        renderOnboarding();
+      }
+      if(document.getElementById('mainStage') && !document.getElementById('mainStage').classList.contains('is-hidden')){
+        renderAll();
       }
     });
-    onSnapshot(doc(db, "planning", "roster"), snap=>{
-      if(snap.exists() && snap.data() && snap.data().list){
-        roster = snap.data().list.map(m => typeof m === "string" ? {name:m, role:"salle"} : m);
-        if(!document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
-      }
-    });
-    onSnapshot(doc(db, "planning", "admins"), snap=>{
-      if(snap.exists() && snap.data() && Array.isArray(snap.data().uids)){
-        adminUids = snap.data().uids;
-        if(!document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
-      }
-    });
-  }catch(e){ console.warn("live sync failed", e); }
+  }catch(e){ console.warn("members sub failed", e); }
 }
-function saveSchedule(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","schedule"), {json: JSON.stringify(scheduleData)}).catch(e=>{ console.warn(e); showToast("Échec de l'enregistrement — vérifie ta connexion"); }); }
-function saveRoster(){ if(!firebaseOk) return Promise.resolve(); return setDoc(doc(db,"planning","roster"), {list: roster}).catch(e=>{ console.warn(e); showToast("Échec de l'enregistrement — vérifie ta connexion"); }); }
-function saveIdentity(name){ myName = name; try{ localStorage.setItem(IDENTITY_KEY, name); }catch(e){} }
-
-function hamidIn(shift){ return shift && shift.x && myName && shift.x.includes(myName); }
-function colorVarFor(name){
-  const idx = roster.findIndex(p=>p.name===name);
-  const n = idx>=0 ? idx : 0;
-  return `var(--p-${(n%6)+1})`;
+async function addMember(name){
+  const ref = doc(collection(db,"members"));
+  const now = Date.now();
+  await setDoc(ref, {name, active:true, createdAt:now, updatedAt:now});
+  return ref.id;
 }
-function avatarStyle(name){ return name===myName ? `background:var(--me)` : `background:${colorVarFor(name)}`; }
+async function renameMember(id, newName){
+  const m = members[id]; if(!m) return;
+  await setDoc(doc(db,"members",id), {...m, name:newName, updatedAt:Date.now()});
+}
+async function deactivateMember(id){
+  const m = members[id]; if(!m) return;
+  await setDoc(doc(db,"members",id), {...m, active:false, updatedAt:Date.now()});
+}
+async function markSelfManagerHint(id){
+  const m = members[id]; if(!m || m.isManagerHint) return; // cosmetic only, never used for permission checks
+  try{ await setDoc(doc(db,"members",id), {...m, isManagerHint:true, updatedAt:Date.now()}); }catch(e){}
+}
+
+/* ============ ADMINS ============ */
+function subscribeAdmins(){
+  if(!firebaseOk) return;
+  try{
+    onSnapshot(doc(db,"planning","admins"), snap=>{
+      if(snap.exists() && Array.isArray(snap.data().uids)) adminUids = snap.data().uids;
+      if(document.getElementById('mainStage') && !document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
+    });
+  }catch(e){ console.warn("admins sub failed", e); }
+  // seed the doc once if missing, so the console has something to edit
+  getDoc(doc(db,"planning","admins")).then(snap=>{
+    if(!snap.exists()) setDoc(doc(db,"planning","admins"), {uids: []}).catch(()=>{});
+  }).catch(()=>{});
+}
+
+/* ============ DAYS (per-day documents) ============ */
+function subscribeDay(dateStr){
+  if(!firebaseOk || daySubs[dateStr]) return;
+  daySubs[dateStr] = onSnapshot(doc(db,"days",dateStr), snap=>{
+    daysCache[dateStr] = snap.exists() ? snap.data() : {};
+    if(document.getElementById('mainStage') && !document.getElementById('mainStage').classList.contains('is-hidden')) renderAll();
+  }, e=> console.warn("day sub failed", dateStr, e));
+}
+function ensureDaysSubscribed(dateStrArray){
+  dateStrArray.forEach(subscribeDay);
+}
+async function writeDay(dateStr, dayObj){
+  if(!firebaseOk) return;
+  await setDoc(doc(db,"days",dateStr), {...dayObj, updatedAt:Date.now(), updatedBy: myMemberId || null})
+    .catch(e=>{ console.warn(e); showToast("Échec de l'enregistrement — vérifie ta connexion"); });
+}
+function getService(dateStr, dept, shiftKey){
+  const day = daysCache[dateStr];
+  if(!day || !day[dept]) return undefined; // not yet configured
+  return day[dept][shiftKey]; // undefined | {closed:true} | {ids:[...]}
+}
+
+/* ============ IDENTITY / THEME / DEPT persistence ============ */
+function saveIdentity(id){ myMemberId = id; try{ localStorage.setItem(IDENTITY_KEY, id); }catch(e){} }
+function colorVarFor(id){
+  const ids = Object.keys(members).sort();
+  const idx = ids.indexOf(id);
+  return `var(--p-${((idx<0?0:idx)%6)+1})`;
+}
+function avatarStyle(id){ return id===myMemberId ? `background:var(--me)` : `background:${colorVarFor(id)}`; }
 function initial(name){ return (name||"?").trim().charAt(0).toUpperCase(); }
 
 /* ============ TOAST ============ */
@@ -189,48 +180,59 @@ document.querySelector('[data-theme-toggle]').addEventListener('click', ()=>{
   updateThemeIcon(next);
 });
 
+/* ============ DEPARTMENT TOGGLE (global view) ============ */
+function initDept(){
+  try{ currentDept = localStorage.getItem(DEPT_KEY) || 'salle'; }catch(e){ currentDept='salle'; }
+  document.querySelectorAll('.dept-btn').forEach(b=> b.classList.toggle('is-active', b.dataset.dept===currentDept));
+}
+document.querySelectorAll('.dept-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    currentDept = btn.dataset.dept;
+    try{ localStorage.setItem(DEPT_KEY, currentDept); }catch(e){}
+    document.querySelectorAll('.dept-btn').forEach(b=>b.classList.toggle('is-active', b===btn));
+    renderAll();
+  });
+});
+
 /* ============ ONBOARDING ============ */
-let pickedName = null, pickedRole = 'salle';
+let pickedMemberId = null;
 
 function renderOnboarding(){
   const wrap = document.getElementById('obChips');
+  const list = activeMembers();
   wrap.innerHTML = '';
-  roster.forEach(p=>{
+  document.getElementById('obEmptyState').style.display = list.length===0 ? 'block' : 'none';
+  list.forEach(p=>{
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'ob-chip' + (p.name===pickedName ? ' is-picked' : '');
-    chip.innerHTML = `<span class="av sm" style="background:${colorVarFor(p.name)}">${initial(p.name)}</span>${p.name}`;
-    chip.addEventListener('click', ()=>{ pickedName = p.name; renderOnboarding(); document.getElementById('obContinue').disabled = false; });
+    chip.className = 'ob-chip' + (p.id===pickedMemberId ? ' is-picked' : '');
+    chip.innerHTML = `<span class="av sm" style="background:${colorVarFor(p.id)}">${initial(p.name)}</span>${p.name}`;
+    chip.addEventListener('click', ()=>{ pickedMemberId = p.id; renderOnboarding(); document.getElementById('obContinue').disabled = false; });
     wrap.appendChild(chip);
   });
+  document.getElementById('obAdminAddZone').style.display = isAdmin() ? 'block' : 'none';
 }
-document.querySelectorAll('#obRoleToggle .ob-role-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('#obRoleToggle .ob-role-btn').forEach(b=>b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    pickedRole = btn.dataset.role;
-  });
-});
-document.getElementById('obAddBtn').addEventListener('click', ()=>{
+document.getElementById('obAddBtn').addEventListener('click', async ()=>{
   const input = document.getElementById('obNewName');
-  const v = input.value.trim().toUpperCase();
+  const v = input.value.trim();
   if(!v) return;
-  if(!roster.find(p=>p.name===v)){ roster.push({name:v, role:pickedRole}); saveRoster(); }
-  pickedName = v; input.value = '';
+  const id = await addMember(v);
+  pickedMemberId = id; input.value = '';
   renderOnboarding();
   document.getElementById('obContinue').disabled = false;
 });
 document.getElementById('obContinue').addEventListener('click', ()=>{
-  if(!pickedName) return;
-  saveIdentity(pickedName);
+  if(!pickedMemberId) return;
+  saveIdentity(pickedMemberId);
   enterApp();
 });
 
 function enterApp(){
   document.getElementById('onboardingStage').classList.add('is-hidden');
   document.getElementById('mainStage').classList.remove('is-hidden');
-  document.getElementById('meAvatar').textContent = initial(myName);
-  document.getElementById('meLabel').textContent = myName;
+  document.getElementById('meAvatar').textContent = initial(myName());
+  document.getElementById('meLabel').textContent = myName();
+  if(isAdmin()) markSelfManagerHint(myMemberId);
   goToTab('today');
   renderAll();
 }
@@ -243,7 +245,7 @@ document.getElementById('meChip').addEventListener('click', ()=>{
 document.getElementById('pfSwitchBtn').addEventListener('click', ()=>{
   document.getElementById('mainStage').classList.add('is-hidden');
   document.getElementById('onboardingStage').classList.remove('is-hidden');
-  pickedName = null;
+  pickedMemberId = null;
   document.getElementById('obContinue').disabled = true;
   renderOnboarding();
 });
@@ -256,39 +258,44 @@ function goToTab(name){
 }
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click', ()=>{
-    const name = tab.dataset.tab;
-    goToTab(name);
-    if(name==='week') renderWeek();
-    if(name==='team') renderTeam();
+    goToTab(tab.dataset.tab);
+    renderAll();
   });
 });
 
 /* ============ TODAY VIEW ============ */
+function worksOn(dateStr, dept){
+  const m = getService(dateStr, dept, 'm'), s = getService(dateStr, dept, 's');
+  const inShift = (sh)=> sh && sh.ids && sh.ids.includes(myMemberId);
+  return inShift(m) || inShift(s);
+}
+
 function renderToday(){
   const d = new Date(selectedDate+"T00:00:00");
   document.getElementById('heroDate').textContent = `${dayFullFr[d.getDay()]} ${d.getDate()} ${monthFr[d.getMonth()]}`;
 
-  const day = scheduleData[selectedDate];
-  const worksMidi = hamidIn(day && day.m), worksSoir = hamidIn(day && day.s);
-  const closedAll = day && day.m && day.m.c && (!day.s || day.s.c);
+  const m = getService(selectedDate, currentDept, 'm');
+  const s = getService(selectedDate, currentDept, 's');
+  const worksMidi = m && m.ids && m.ids.includes(myMemberId);
+  const worksSoir = s && s.ids && s.ids.includes(myMemberId);
+  const closedAll = (m && m.closed) && (s === undefined || (s && s.closed));
+
   const hero = document.getElementById('hero');
   const pill = document.getElementById('heroPill');
   const title = document.getElementById('heroTitle');
   const sub = document.getElementById('heroSub');
-
   hero.classList.remove('is-work','is-rest');
-  if(!day){
-    pill.textContent = '—'; title.textContent = 'Pas de données'; sub.textContent = '';
-  } else if(worksMidi || worksSoir){
+
+  if(worksMidi || worksSoir){
     hero.classList.add('is-work');
     pill.textContent = 'Travail';
     const both = worksMidi && worksSoir;
     title.textContent = both ? 'Double aujourd\u2019hui \uD83D\uDCAA' : (worksSoir ? 'Tu travailles ce soir' : 'Tu travailles ce midi');
-    const withShift = worksSoir ? day.s : day.m;
-    const others = withShift.x.filter(n=>n!==myName);
+    const withShift = worksSoir ? s : m;
+    const others = withShift.ids.filter(id=>id!==myMemberId).map(memberName);
     sub.innerHTML = (worksSoir?'<b>Ce soir</b>':'<b>Ce midi</b>') + (others.length? ' · avec ' + others.join(' et ') : '');
   } else if(closedAll){
-    pill.textContent = 'Fermé'; title.textContent = 'Restaurant fermé'; sub.textContent = '';
+    pill.textContent = 'Fermé'; title.textContent = 'Fermé aujourd\u2019hui'; sub.textContent = '';
   } else {
     hero.classList.add('is-rest');
     pill.textContent = 'Repos';
@@ -301,16 +308,17 @@ function renderToday(){
   const split = document.getElementById('todaySplit');
   split.innerHTML = '';
   ['m','s'].forEach(k=>{
-    const shift = day ? day[k] : null;
-    const isMine = shift && shift.x && shift.x.includes(myName);
+    const shift = getService(selectedDate, currentDept, k);
+    const isMine = shift && shift.ids && shift.ids.includes(myMemberId);
     const slot = document.createElement('div');
     slot.className = 'slot' + (isMine ? ' mine' : '');
     let inner = `<div class="slot-head">${k==='m'?'☀️ Midi':'🌙 Soir'}</div>`;
-    if(!shift){ inner += '<span class="empty">Personne</span>'; }
-    else if(shift.c){ inner += '<span class="empty">Fermé</span>'; }
+    if(shift===undefined){ inner += '<span class="empty">Pas encore planifié</span>'; }
+    else if(shift.closed){ inner += '<span class="empty closed">Fermé</span>'; }
+    else if(!shift.ids || shift.ids.length===0){ inner += '<span class="empty">Personne pour l\u2019instant</span>'; }
     else{
-      inner += '<div class="crew">' + shift.x.map(n=>
-        `<div class="crew-item${n===myName?' me':''}"><span class="av sm" style="${avatarStyle(n)}">${initial(n)}</span>${n}</div>`
+      inner += '<div class="crew">' + shift.ids.map(id=>
+        `<div class="crew-item${id===myMemberId?' me':''}"><span class="av sm" style="${avatarStyle(id)}">${initial(memberName(id))}</span>${memberName(id)}</div>`
       ).join('') + '</div>';
     }
     slot.innerHTML = inner;
@@ -323,18 +331,16 @@ function renderToday(){
 function renderNextService(){
   const wrap = document.getElementById('nextWrap');
   const txt = document.getElementById('nextTxt');
-  // find the next upcoming shift (today or later) that includes myName
   for(let i=0;i<14;i++){
-    const ds = addDays(fmtDate(new Date()), i);
-    const day = scheduleData[ds];
-    if(!day) continue;
+    const ds = addDays(todayStr(), i);
+    ensureDaysSubscribed([ds]);
     for(const k of ['m','s']){
-      const shift = day[k];
-      if(shift && shift.x && shift.x.includes(myName)){
+      const shift = getService(ds, currentDept, k);
+      if(shift && shift.ids && shift.ids.includes(myMemberId)){
         const d = new Date(ds+"T00:00:00");
-        const isToday = ds===fmtDate(new Date());
+        const isToday = ds===todayStr();
         const when = isToday ? (k==='m'?"aujourd'hui midi":"ce soir") : `${dayFullFr[d.getDay()]} ${d.getDate()} ${k==='m'?'midi':'soir'}`;
-        const others = shift.x.filter(n=>n!==myName);
+        const others = shift.ids.filter(id=>id!==myMemberId).map(memberName);
         wrap.style.display = 'flex';
         txt.innerHTML = `<b>Prochain service</b>${k==='m'?'☀️':'🌙'} ${when.charAt(0).toUpperCase()+when.slice(1)}` + (others.length?` avec ${others.join(' et ')}`:'');
         return;
@@ -348,30 +354,32 @@ function renderDayStrip(){
   const el = document.getElementById('dayStrip');
   el.innerHTML = '';
   const monday = mondayOf(selectedDate);
-  for(let i=0;i<7;i++){
-    const ds = addDays(monday, i);
-    const day = scheduleData[ds];
-    const works = day && (hamidIn(day.m) || hamidIn(day.s));
+  const week = [];
+  for(let i=0;i<7;i++) week.push(addDays(monday, i));
+  ensureDaysSubscribed(week);
+  week.forEach((ds,i)=>{
+    const works = worksOn(ds, currentDept);
     const d = new Date(ds+"T00:00:00");
     const chip = document.createElement('div');
     chip.className = 'day' + (ds===selectedDate ? ' is-sel' : '');
     chip.innerHTML = `<span class="day-l">${joursLabelShort[jours[i]]}</span><span class="day-n">${d.getDate()}</span><span class="day-dot${works?'':' off'}"></span>`;
     chip.addEventListener('click', ()=>{ selectedDate = ds; renderToday(); });
     el.appendChild(chip);
-  }
+  });
 }
 
 document.getElementById('shareBtn').addEventListener('click', async ()=>{
-  const day = scheduleData[selectedDate];
   const d = new Date(selectedDate+"T00:00:00");
   const dateLabel = `${dayFullFr[d.getDay()]} ${d.getDate()} ${monthFr[d.getMonth()]}`;
-  let text = `Planning — ${dateLabel}\n`;
+  const deptLabel = currentDept==='cuisine' ? 'Cuisine' : 'Salle';
+  let text = `Planning — ${dateLabel} — ${deptLabel}\n`;
   ['m','s'].forEach(k=>{
-    const shift = day ? day[k] : null;
+    const shift = getService(selectedDate, currentDept, k);
     text += (k==='m' ? '\u2600\ufe0f Midi : ' : '\uD83C\uDF19 Soir : ');
-    if(!shift) text += 'personne\n';
-    else if(shift.c) text += 'fermé\n';
-    else text += shift.x.join(', ') + '\n';
+    if(shift===undefined) text += 'pas encore planifié\n';
+    else if(shift.closed) text += 'fermé\n';
+    else if(!shift.ids || shift.ids.length===0) text += 'personne\n';
+    else text += shift.ids.map(memberName).join(', ') + '\n';
   });
   try{
     if(navigator.share){ await navigator.share({title:'Planning', text}); }
@@ -385,60 +393,61 @@ function renderWeek(){
   const sunday = addDays(monday, 6);
   const fmtShort = ds=>{ const d=new Date(ds+"T00:00:00"); return `${d.getDate()} ${monthFr[d.getMonth()].slice(0,3)}`; };
   document.getElementById('wLabel').textContent = `${fmtShort(monday)} — ${fmtShort(sunday)}`;
-  const todayMonday = mondayOf(fmtDate(new Date()));
+  const todayMonday = mondayOf(todayStr());
   document.getElementById('wMeta').textContent = monday===todayMonday ? 'Cette semaine' : '';
+
+  const week = [];
+  for(let i=0;i<7;i++) week.push(addDays(monday,i));
+  ensureDaysSubscribed(week);
 
   const grid = document.getElementById('wGrid');
   grid.innerHTML = '';
-  const todayStr = fmtDate(new Date());
-  let myDaysCount = 0;
-
   const dayCardsEl = document.getElementById('dayCards');
   dayCardsEl.innerHTML = '';
+  let myDaysCount = 0;
 
-  for(let i=0;i<7;i++){
-    const ds = addDays(monday, i);
-    const day = scheduleData[ds];
+  week.forEach((ds,i)=>{
     const d = new Date(ds+"T00:00:00");
-    const isToday = ds===todayStr;
-    const closedAll = day && day.m && day.m.c && (!day.s || day.s.c);
-    if(day && (hamidIn(day.m) || hamidIn(day.s))) myDaysCount++;
+    const isToday = ds===todayStr();
+    const m = getService(ds, currentDept, 'm'), s = getService(ds, currentDept, 's');
+    const closedAll = (m && m.closed) && (s===undefined || (s && s.closed));
+    if(worksOn(ds, currentDept)) myDaysCount++;
 
-    // --- grid row ---
+    // grid row
     const row = document.createElement('div');
     row.className = 'wrow' + (isToday?' today':'') + (closedAll?' rest':'');
     const cellHtml = (shift)=>{
-      if(!shift) return '<span class="wdash">—</span>';
-      if(shift.c) return '<span class="wdash">Fermé</span>';
-      return shift.x.map(n=>`<span class="av sm${n===myName?' is-me':''}" style="${avatarStyle(n)}" title="${n}">${initial(n)}</span>`).join('');
+      if(shift===undefined) return '<span class="wdash">—</span>';
+      if(shift.closed) return '<span class="wdash closed">Fermé</span>';
+      if(!shift.ids || shift.ids.length===0) return '<span class="wdash">—</span>';
+      return shift.ids.map(id=>`<span class="av sm${id===myMemberId?' is-me':''}" style="${avatarStyle(id)}" title="${memberName(id)}">${initial(memberName(id))}</span>`).join('');
     };
     row.innerHTML = `
       <div class="wday"><b>${joursLabelShort[jours[i]]}</b><span>${d.getDate()}</span></div>
-      <div class="wcell">${cellHtml(day && day.m)}</div>
-      <div class="wcell">${cellHtml(day && day.s)}</div>`;
+      <div class="wcell">${cellHtml(m)}</div>
+      <div class="wcell">${cellHtml(s)}</div>`;
     if(isAdmin()){
       row.querySelector('.wcell:nth-child(2)').addEventListener('click', ()=> openSheet(ds, 'm'));
       row.querySelector('.wcell:nth-child(3)').addEventListener('click', ()=> openSheet(ds, 's'));
     }
     grid.appendChild(row);
 
-    // --- daily card ---
+    // daily card
     const card = document.createElement('div');
     card.className = 'dcard' + (closedAll?' rest':'');
     const rowHtml = (shift, label)=>{
       let names;
-      if(!shift) names = '<span class="dcard-empty">Personne</span>';
-      else if(shift.c) names = '<span class="dcard-empty">Fermé</span>';
-      else names = shift.x.map(n=> n===myName ? `<span class="me">${n}</span>` : n).join(' · ');
+      if(shift===undefined) names = '<span class="dcard-empty">Pas encore planifié</span>';
+      else if(shift.closed) names = '<span class="dcard-empty closed">Fermé</span>';
+      else if(!shift.ids || shift.ids.length===0) names = '<span class="dcard-empty">Personne pour l\u2019instant</span>';
+      else names = shift.ids.map(id=> id===myMemberId ? `<span class="me">${memberName(id)}</span>` : memberName(id)).join(' · ');
       return `<div class="dcard-row"><span class="lbl">${label}</span><span class="dcard-names">${names}</span></div>`;
     };
     card.innerHTML = `<div class="dcard-head"><b>${joursLabelUC[jours[i]]} ${d.getDate()}</b>${closedAll?'<span>fermé</span>':''}</div>`
-      + rowHtml(day && day.m, '☀️ Midi') + rowHtml(day && day.s, '🌙 Soir');
-    if(isAdmin()){
-      card.addEventListener('click', ()=> openSheet(ds, 'm'));
-    }
+      + rowHtml(m, '☀️ Midi') + rowHtml(s, '🌙 Soir');
+    if(isAdmin()){ card.addEventListener('click', ()=> openSheet(ds, 'm')); }
     dayCardsEl.appendChild(card);
-  }
+  });
 
   document.getElementById('joursPourToi').innerHTML = `<b>${myDaysCount}</b> jour${myDaysCount>1?'s':''} pour toi cette semaine`;
 }
@@ -448,26 +457,45 @@ document.getElementById('wNext').addEventListener('click', ()=>{ weekWindowStart
 document.getElementById('copyBtn').addEventListener('click', async ()=>{
   if(!isAdmin()){ showToast("Seuls les managers peuvent modifier le planning"); return; }
   const nextMonday = addDays(weekWindowStart, 7);
+  const nextWeek = []; for(let i=0;i<7;i++) nextWeek.push(addDays(nextMonday,i));
+  ensureDaysSubscribed(nextWeek);
+  await new Promise(r=>setTimeout(r, 400)); // let the fresh subscriptions populate the cache
+
+  let copied = 0;
   for(let i=0;i<7;i++){
     const src = addDays(weekWindowStart, i);
-    const dst = addDays(nextMonday, i);
-    if(scheduleData[src]) scheduleData[dst] = JSON.parse(JSON.stringify(scheduleData[src]));
+    const dst = nextWeek[i];
+    const srcDay = daysCache[src] || {};
+    const dstDay = daysCache[dst] ? JSON.parse(JSON.stringify(daysCache[dst])) : {};
+    let changed = false;
+    ['salle','cuisine'].forEach(dept=>{
+      ['m','s'].forEach(k=>{
+        const srcVal = srcDay[dept] && srcDay[dept][k];
+        const dstVal = dstDay[dept] && dstDay[dept][k];
+        if(srcVal !== undefined && dstVal === undefined){
+          dstDay[dept] = dstDay[dept] || {};
+          dstDay[dept][k] = srcVal;
+          changed = true; copied++;
+        }
+      });
+    });
+    if(changed){ await writeDay(dst, dstDay); }
   }
-  await saveSchedule();
-  showToast('Semaine copiée vers la suivante \u2705');
+  showToast(copied>0 ? `${copied} service(s) copié(s) vers la semaine suivante \u2705` : 'La semaine suivante était déjà complète');
   renderWeek();
 });
 
 /* ============ SHIFT EDIT SHEET ============ */
 function openSheet(dateStr, initialShiftKey){
   if(!isAdmin()) return;
-  const day = scheduleData[dateStr] || {m:null, s:null};
+  const day = daysCache[dateStr] || {};
   sheetContext = {
     date: dateStr,
+    dept: currentDept,
     shiftKey: initialShiftKey || 'm',
     draft: {
-      m: day.m ? {x:(day.m.x||[]).slice(), n: day.m.n || ''} : null,
-      s: day.s ? {x:(day.s.x||[]).slice(), n: day.s.n || ''} : null,
+      m: day[currentDept] ? day[currentDept].m : undefined,
+      s: day[currentDept] ? day[currentDept].s : undefined,
     }
   };
   document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(b=>
@@ -479,29 +507,48 @@ function openSheet(dateStr, initialShiftKey){
 
 function readSheetIntoDraft(){
   if(!sheetContext) return;
-  const selected = Array.from(document.querySelectorAll('#sheetPeople .pickcircle.is-selected'))
-    .map(el => el.querySelector('span:last-child').textContent);
-  const note = document.getElementById('sheetNote').value.trim();
-  sheetContext.draft[sheetContext.shiftKey] = selected.length ? {x: selected, n: note} : null;
+  const isClosed = document.querySelector('#sheetStateToggle .sheet-state-btn[data-state="closed"]').classList.contains('is-active-closed');
+  if(isClosed){
+    sheetContext.draft[sheetContext.shiftKey] = {closed:true};
+  } else {
+    const selected = Array.from(document.querySelectorAll('#sheetPeople .pickcircle.is-selected')).map(el=>el.dataset.id);
+    const note = document.getElementById('sheetNote').value.trim();
+    const val = {ids: selected};
+    if(note) val.note = note;
+    sheetContext.draft[sheetContext.shiftKey] = val;
+  }
 }
 
 function renderSheetShift(){
-  const { date, shiftKey, draft } = sheetContext;
+  const { date, dept, shiftKey, draft } = sheetContext;
   const d = new Date(date+"T00:00:00");
+  const deptLabel = dept==='cuisine' ? 'Cuisine' : 'Salle';
   document.getElementById('sheetTitle').textContent =
-    `${dayFullFr[d.getDay()].charAt(0).toUpperCase()+dayFullFr[d.getDay()].slice(1)} ${d.getDate()} · ${shiftKey==='m'?'Midi':'Soir'}`;
+    `${dayFullFr[d.getDay()].charAt(0).toUpperCase()+dayFullFr[d.getDay()].slice(1)} ${d.getDate()} · ${shiftKey==='m'?'Midi':'Soir'} · ${deptLabel}`;
 
   const shift = draft[shiftKey];
-  const selectedNames = shift ? shift.x.slice() : [];
+  const isClosed = !!(shift && shift.closed);
+  document.querySelectorAll('#sheetStateToggle .sheet-state-btn').forEach(b=>{
+    const active = (b.dataset.state==='closed') === isClosed;
+    b.classList.toggle('is-active-open', b.dataset.state==='open' && active);
+    b.classList.toggle('is-active-closed', b.dataset.state==='closed' && active);
+  });
 
   const peopleEl = document.getElementById('sheetPeople');
+  const activeList = activeMembers();
+  document.getElementById('sheetSub').style.display = isClosed ? 'none' : 'block';
+  peopleEl.style.display = isClosed ? 'none' : 'flex';
+  document.getElementById('sheetNote').style.display = isClosed ? 'none' : 'block';
+
   peopleEl.innerHTML = '';
-  roster.forEach(p=>{
-    const isSel = selectedNames.includes(p.name);
+  const selectedIds = (shift && shift.ids) ? shift.ids.slice() : [];
+  activeList.forEach(p=>{
+    const isSel = selectedIds.includes(p.id);
     const el = document.createElement('button');
     el.type = 'button';
+    el.dataset.id = p.id;
     el.className = 'pickcircle' + (isSel ? ' is-selected' : '');
-    el.innerHTML = `<span class="av lg" style="${p.name===myName?'background:var(--me)':`background:${colorVarFor(p.name)}`}">${initial(p.name)}</span><span>${p.name}</span>`;
+    el.innerHTML = `<span class="av lg" style="${p.id===myMemberId?'background:var(--me)':`background:${colorVarFor(p.id)}`}">${initial(p.name)}</span><span>${p.name}</span>`;
     el.addEventListener('click', ()=>{
       if(el.classList.contains('is-selected')){
         if(confirm(`Retirer ${p.name} de ce service ?`)){ el.classList.remove('is-selected'); }
@@ -512,15 +559,23 @@ function renderSheetShift(){
     peopleEl.appendChild(el);
   });
 
-  document.getElementById('sheetNote').value = shift ? (shift.n || '') : '';
+  document.getElementById('sheetNote').value = (shift && shift.note) ? shift.note : '';
 }
 
 document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     if(!sheetContext || btn.dataset.shift===sheetContext.shiftKey) return;
-    readSheetIntoDraft(); // keep whatever was being edited on the shift we're leaving
+    readSheetIntoDraft();
     sheetContext.shiftKey = btn.dataset.shift;
     document.querySelectorAll('#sheetShiftToggle .sheet-shift-btn').forEach(b=>b.classList.toggle('is-active', b===btn));
+    renderSheetShift();
+  });
+});
+document.querySelectorAll('#sheetStateToggle .sheet-state-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(!sheetContext) return;
+    const closed = btn.dataset.state==='closed';
+    sheetContext.draft[sheetContext.shiftKey] = closed ? {closed:true} : {ids:[]};
     renderSheetShift();
   });
 });
@@ -535,10 +590,11 @@ document.getElementById('sheetBackdrop').addEventListener('click', closeSheet);
 document.getElementById('sheetDoneBtn').addEventListener('click', async ()=>{
   if(!sheetContext || !isAdmin()) { closeSheet(); return; }
   readSheetIntoDraft();
-  const { date, draft } = sheetContext;
-  scheduleData[date] = { m: draft.m, s: draft.s };
+  const { date, dept, draft } = sheetContext;
+  const day = daysCache[date] ? JSON.parse(JSON.stringify(daysCache[date])) : {};
+  day[dept] = { m: draft.m, s: draft.s };
 
-  await saveSchedule();
+  await writeDay(date, day);
   showToast('Service mis à jour \u2705');
   closeSheet();
   renderWeek();
@@ -557,32 +613,24 @@ function renderEquity(){
   const el = document.getElementById('equity');
   el.innerHTML = '';
   const counts = {};
-  roster.forEach(p=> counts[p.name] = {midi:0, soir:0});
+  activeMembers().forEach(p=> counts[p.id] = {midi:0, soir:0});
   for(let i=0;i<7;i++){
     const ds = addDays(monday, i);
-    const day = scheduleData[ds];
-    if(!day) continue;
-    ['m','s'].forEach(k=>{
-      const shift = day[k];
-      if(shift && shift.x){
-        shift.x.forEach(n=>{
-          if(!counts[n]) counts[n] = {midi:0, soir:0};
-          if(k==='m') counts[n].midi++; else counts[n].soir++;
-        });
-      }
-    });
+    const m = getService(ds, currentDept, 'm'), s = getService(ds, currentDept, 's');
+    if(m && m.ids) m.ids.forEach(id=>{ counts[id] = counts[id] || {midi:0,soir:0}; counts[id].midi++; });
+    if(s && s.ids) s.ids.forEach(id=>{ counts[id] = counts[id] || {midi:0,soir:0}; counts[id].soir++; });
   }
   const maxTotal = Math.max(1, ...Object.values(counts).map(c=>c.midi+c.soir));
-  roster.forEach(p=>{
-    const c = counts[p.name] || {midi:0, soir:0};
+  activeMembers().forEach(p=>{
+    const c = counts[p.id] || {midi:0, soir:0};
     const total = c.midi + c.soir;
     const card = document.createElement('div');
-    card.className = 'eq' + (p.name===myName ? ' is-me' : '');
+    card.className = 'eq' + (p.id===myMemberId ? ' is-me' : '');
     const midiPct = total ? (c.midi/maxTotal*100) : 0;
     const soirPct = total ? (c.soir/maxTotal*100) : 0;
     card.innerHTML = `
       <div class="eq-top">
-        <span class="av sm" style="${avatarStyle(p.name)}">${initial(p.name)}</span>
+        <span class="av sm" style="${avatarStyle(p.id)}">${initial(p.name)}</span>
         <span class="eq-name">${p.name}</span>
         <span class="eq-total">${total} service${total>1?'s':''}</span>
       </div>
@@ -592,40 +640,52 @@ function renderEquity(){
   });
 }
 
+let editingMemberId = null;
 function renderPeople(){
   const el = document.getElementById('people');
   el.innerHTML = '';
-  const filtered = roster.filter(p=> teamFilterRole==='all' || p.role===teamFilterRole);
-  filtered.forEach(p=>{
-    const admin = DEFAULT_ADMIN_NAMES.includes(p.name);
-    const showBadge = p.name===myName ? '' : (admin?'<span class="manager-badge">Manager</span>':'<span class="member-badge">Membre</span>');
+  activeMembers().forEach(p=>{
     const row = document.createElement('div');
     row.className = 'person';
     row.innerHTML = `
-      <span class="av" style="${p.name===myName?'background:var(--me)':avatarStyle(p.name)}">${initial(p.name)}</span>
-      <div class="person-txt"><b>${p.name} ${showBadge}</b><span>${p.role==='cuisine'?'Cuisine':'Salle'}</span></div>
-      ${(p.name!==myName && isAdmin()) ? '<button class="icon-btn rm-person" aria-label="Retirer">✕</button>' : ''}`;
-    if(p.name!==myName && isAdmin()){
-      row.querySelector('.rm-person').addEventListener('click', async ()=>{
-        if(roster.length<=1) return;
-        if(!confirm(`Retirer ${p.name} de l'équipe ?`)) return;
-        roster = roster.filter(x=>x.name!==p.name);
-        await saveRoster();
-        renderTeam();
-      });
+      <span class="av" style="${p.id===myMemberId?'background:var(--me)':avatarStyle(p.id)}">${initial(p.name)}</span>
+      <div class="person-txt"><b>${p.name} ${(p.isManagerHint && p.id!==myMemberId)?'<span class="manager-badge">Manager</span>':''}</b></div>
+      ${p.id===myMemberId ? '<span class="tagme">Toi</span>' : ''}`;
+    if(isAdmin()){
+      row.addEventListener('click', ()=>{ editingMemberId = (editingMemberId===p.id ? null : p.id); renderMemberEdit(); });
     }
     el.appendChild(row);
   });
+  renderMemberEdit();
 }
 
-document.querySelectorAll('#teamFilter .tf-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('#teamFilter .tf-btn').forEach(b=>b.classList.remove('is-active'));
-    btn.classList.add('is-active');
-    teamFilterRole = btn.dataset.role;
-    renderPeople();
+function renderMemberEdit(){
+  const zone = document.getElementById('memberEditZone');
+  if(!editingMemberId || !isAdmin() || !members[editingMemberId]){ zone.innerHTML=''; return; }
+  const p = members[editingMemberId];
+  zone.innerHTML = `
+    <div class="member-editrow">
+      <label class="edit-label">Prénom</label>
+      <input type="text" id="meName" class="ob-input" value="${p.name}">
+      <button class="btn btn-solid" id="meSaveBtn" style="margin-top:8px;">Enregistrer</button>
+      <button class="btn btn-ghost btn-danger" id="meDeactivateBtn" style="width:100%;margin-top:8px;">Désactiver ce membre</button>
+    </div>`;
+  zone.querySelector('#meSaveBtn').addEventListener('click', async ()=>{
+    const v = zone.querySelector('#meName').value.trim();
+    if(!v) return;
+    await renameMember(editingMemberId, v);
+    showToast('Prénom mis à jour \u2705');
+    editingMemberId = null;
+    renderTeam();
   });
-});
+  zone.querySelector('#meDeactivateBtn').addEventListener('click', async ()=>{
+    if(!confirm(`Désactiver ${p.name} ? Il/elle n'apparaîtra plus dans les nouveaux services, mais l'historique reste intact.`)) return;
+    await deactivateMember(editingMemberId);
+    showToast(`${p.name} désactivé(e)`);
+    editingMemberId = null;
+    renderTeam();
+  });
+}
 
 function renderAddMember(){
   const zone = document.getElementById('addMemberZone');
@@ -633,28 +693,15 @@ function renderAddMember(){
   zone.innerHTML = `
     <h2 class="sec-title">Ajouter un membre</h2>
     <input type="text" id="teamNewName" class="ob-input" placeholder="Prénom">
-    <div class="ob-roletoggle" id="teamRoleToggle">
-      <button type="button" class="ob-role-btn is-active" data-role="salle">Salle</button>
-      <button type="button" class="ob-role-btn" data-role="cuisine">Cuisine</button>
-    </div>
     <button class="btn btn-solid" id="teamAddBtn" style="width:100%;">Ajouter</button>`;
-  let teamNewRole = 'salle';
-  zone.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      zone.querySelectorAll('#teamRoleToggle .ob-role-btn').forEach(b=>b.classList.remove('is-active'));
-      btn.classList.add('is-active');
-      teamNewRole = btn.dataset.role;
-    });
-  });
   zone.querySelector('#teamAddBtn').addEventListener('click', async ()=>{
     const input = zone.querySelector('#teamNewName');
-    const v = input.value.trim().toUpperCase();
-    if(!v || roster.find(p=>p.name===v)) return;
-    roster.push({name:v, role:teamNewRole});
-    await saveRoster();
+    const v = input.value.trim();
+    if(!v) return;
+    await addMember(v);
     input.value = '';
-    renderTeam();
     showToast(`${v} ajouté(e) à l'équipe`);
+    renderTeam();
   });
 }
 
@@ -665,11 +712,8 @@ document.getElementById('btnCopyLink').addEventListener('click', async ()=>{
 
 /* ============ PROFILE VIEW ============ */
 function renderProfile(){
-  document.getElementById('pfAvatar').textContent = initial(myName);
-  document.getElementById('pfName').textContent = myName;
-  const me = roster.find(p=>p.name===myName);
-  document.getElementById('pfRoleLabel').textContent = (me && me.role==='cuisine') ? 'Cuisine' : 'Salle';
-  document.getElementById('pfNewName').value = '';
+  document.getElementById('pfAvatar').textContent = initial(myName());
+  document.getElementById('pfName').textContent = myName();
 
   const adminZone = document.getElementById('pfAdminZone');
   if(isAdmin() && myUid){
@@ -677,10 +721,10 @@ function renderProfile(){
       <h2 class="sec-title">Identifiant appareil</h2>
       <p class="hint tight">Déjà enregistré comme manager sur cet appareil.</p>
       <div class="device-id-box">${myUid}</div>`;
-  } else if(DEFAULT_ADMIN_NAMES.includes(myName) && myUid){
+  } else if(myUid){
     adminZone.innerHTML = `
       <h2 class="sec-title">Activation manager</h2>
-      <p class="hint tight">Envoie cet identifiant à la personne qui configure l'appli, pour activer tes droits manager sur cet appareil :</p>
+      <p class="hint tight">Si tu dois devenir manager, envoie cet identifiant à un manager actuel :</p>
       <div class="device-id-box">${myUid}</div>
       <button class="btn btn-ghost" id="copyUidBtn" style="width:100%;margin-top:8px;">Copier l'identifiant</button>`;
     adminZone.querySelector('#copyUidBtn').addEventListener('click', async ()=>{
@@ -692,41 +736,13 @@ function renderProfile(){
   }
 }
 
-document.getElementById('pfRenameBtn').addEventListener('click', async ()=>{
-  const newName = document.getElementById('pfNewName').value.trim().toUpperCase();
-  if(!newName || newName===myName) return;
-  if(roster.find(p=>p.name===newName)){ showToast('Ce prénom existe déjà dans l\u2019équipe'); return; }
-
-  const oldName = myName;
-  // Update roster entry
-  const entry = roster.find(p=>p.name===oldName);
-  if(entry) entry.name = newName;
-  await saveRoster();
-
-  // Propagate through every schedule entry, past and future
-  Object.keys(scheduleData).forEach(ds=>{
-    const day = scheduleData[ds];
-    ['m','s'].forEach(k=>{
-      if(day && day[k] && day[k].x){
-        day[k].x = day[k].x.map(n=> n===oldName ? newName : n);
-      }
-    });
-  });
-  await saveSchedule();
-
-  saveIdentity(newName);
-  document.getElementById('meLabel').textContent = newName;
-  document.getElementById('meAvatar').textContent = initial(newName);
-  showToast('Prénom mis à jour partout \u2705');
-  renderProfile();
-  renderAll();
-});
-
 /* ============ RENDER ALL ============ */
 function renderAll(){
-  renderToday();
-  if(!document.querySelector('[data-view="week"]').classList.contains('is-hidden')) renderWeek();
-  if(!document.querySelector('[data-view="team"]').classList.contains('is-hidden')) renderTeam();
+  const activeTab = document.querySelector('.tab.is-active');
+  const name = activeTab ? activeTab.dataset.tab : 'today';
+  if(name==='today') renderToday();
+  if(name==='week') renderWeek();
+  if(name==='team') renderTeam();
   if(!document.querySelector('[data-view="profile"]').classList.contains('is-hidden')) renderProfile();
 }
 
@@ -738,9 +754,12 @@ function renderAll(){
 /* ============ INIT ============ */
 (async function init(){
   initTheme();
-  renderOnboarding();
+  initDept();
   await initAuth();
-  await loadAll();
+  subscribeAdmins();
+  subscribeMembers();
+  await new Promise(r=>setTimeout(r, 600)); // let first members/admins snapshot arrive
+  try{ myMemberId = localStorage.getItem(IDENTITY_KEY) || null; }catch(e){ myMemberId = null; }
   renderOnboarding();
-  if(myName){ enterApp(); }
+  if(myMemberId && members[myMemberId]){ enterApp(); }
 })();
